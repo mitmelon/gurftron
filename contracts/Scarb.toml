@@ -2,7 +2,7 @@
 name = "gurftron_db"
 version = "0.1.0"
 authors = ["Adeyeye George"]
-description = "Enhanced decentralized database with security and rewards"
+description = "Enhanced decentralized database with security and reward system"
 edition = "2024_07"
 
 [dependencies]
