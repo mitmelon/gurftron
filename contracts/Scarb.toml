@@ -3,12 +3,10 @@ name = "gurftron_db"
 version = "0.1.0"
 authors = ["Adeyeye George"]
 description = "Enhanced decentralized database with security and rewards"
+edition = "2024_07"
 
 [dependencies]
-starknet = "2.8.2"
+starknet = "2.7.0"
 
-[cairo]
-sierra = "2.8.2"
-
-[scripts]
-test = "scarb cairo-test"
+[[target.starknet-contract]]
+casm = true
