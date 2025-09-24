@@ -1,0 +1,12 @@
+# Directories (no need for leading slash unless you want to match only at root)
+node_modules/
+asset/
+dist/
+program/
+src/
+
+# Files
+key_seed.txt
+manifest.json
+package.json
+package-lock.json
