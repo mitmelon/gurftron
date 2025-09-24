@@ -2,7 +2,7 @@ use starknet::{ContractAddress, get_caller_address, get_block_timestamp, get_con
 use core::array::{ArrayTrait, SpanTrait};
 use core::byte_array::ByteArrayTrait;
 use core::option::OptionTrait;
-use core::traits::{TryInto, Into, Zeroable};
+use core::traits::{TryInto, Into};
 use core::clone::Clone;
 use core::pedersen::pedersen;
 use core::poseidon::PoseidonTrait;
@@ -588,10 +588,11 @@ mod GurftronDB {
         Document, StakeInfo, UserProfile, MaliciousReport
     };
     
+    use starknet::storage::Map;
     use core::array::{ArrayTrait, SpanTrait};
     use core::byte_array::ByteArrayTrait;
     use core::option::OptionTrait;
-    use core::traits::{TryInto, Into, Zeroable};
+    use core::traits::{TryInto, Into};
     use core::pedersen::pedersen;
     use core::poseidon::PoseidonTrait;
     use core::hash::{HashStateTrait, HashStateExTrait};
@@ -645,7 +646,7 @@ mod GurftronDB {
         admin_address: ContractAddress,
         strk_token_address: ContractAddress,
         is_circuit_breaker_active: bool,
-        moderators: LegacyMap<ContractAddress, bool>,
+        moderators: Map<ContractAddress, bool>,
         
         // Original Reward Parameters
         points_per_insert: u32,
@@ -668,47 +669,47 @@ mod GurftronDB {
         transaction_fee_percent: i32,
         
         // Original User Management
-        points: LegacyMap<ContractAddress, i32>,
-        badges: LegacyMap<(ContractAddress, u64), bool>,
-        is_user_premium: LegacyMap<ContractAddress, bool>,
-        banned_users: LegacyMap<ContractAddress, bool>,
-        accounts: LegacyMap<ContractAddress, u64>,
+        points: Map<ContractAddress, i32>,
+        badges: Map<(ContractAddress, u64), bool>,
+        is_user_premium: Map<ContractAddress, bool>,
+        banned_users: Map<ContractAddress, bool>,
+        accounts: Map<ContractAddress, u64>,
         
         // Enhanced User Management
-        user_stakes: LegacyMap<ContractAddress, StakeInfo>,
-        user_profiles: LegacyMap<ContractAddress, UserProfile>,
-        user_last_actions: LegacyMap<(ContractAddress, felt252), u64>, // (user, action_type) -> timestamp
-        user_hourly_actions: LegacyMap<(ContractAddress, felt252, u64), u32>, // (user, action_type, hour) -> count
+        user_stakes: Map<ContractAddress, StakeInfo>,
+        user_profiles: Map<ContractAddress, UserProfile>,
+        user_last_actions: Map<(ContractAddress, felt252), u64>, // (user, action_type) -> timestamp
+        user_hourly_actions: Map<(ContractAddress, felt252, u64), u32>, // (user, action_type, hour) -> count
         
         // Document Storage (Enhanced)
-        next_id: LegacyMap<felt252, felt252>,
-        documents: LegacyMap<(felt252, felt252), Document>,
-        creators: LegacyMap<(felt252, felt252), ContractAddress>,
-        document_voters: LegacyMap<(felt252, felt252, ContractAddress), bool>, // (collection, id, voter) -> has_voted for approval
-        whitelist_voters: LegacyMap<(felt252, felt252, ContractAddress), bool>, // (collection, id, voter) -> has_voted for whitelist
+        next_id: Map<felt252, felt252>,
+        documents: Map<(felt252, felt252), Document>,
+        creators: Map<(felt252, felt252), ContractAddress>,
+        document_voters: Map<(felt252, felt252, ContractAddress), bool>, // (collection, id, voter) -> has_voted for approval
+        whitelist_voters: Map<(felt252, felt252, ContractAddress), bool>, // (collection, id, voter) -> has_voted for whitelist
         
         // Field Management
-        field_lengths: LegacyMap<(felt252, felt252), felt252>,
-        fields_data: LegacyMap<(felt252, felt252, felt252), felt252>, // (collection, id, field) -> value
-        fields_list: LegacyMap<(felt252, felt252, felt252), felt252>, // (collection, id, index) -> field_name
+        field_lengths: Map<(felt252, felt252), felt252>,
+        fields_data: Map<(felt252, felt252, felt252), felt252>, // (collection, id, field) -> value
+        fields_list: Map<(felt252, felt252, felt252), felt252>, // (collection, id, index) -> field_name
         
         // Collection Management
-        num_docs: LegacyMap<felt252, u32>,
-        doc_ids: LegacyMap<(felt252, u32), felt252>,
-        approved_docs: LegacyMap<felt252, u32>, // count of approved docs per collection
-        approved_doc_ids: LegacyMap<(felt252, u32), felt252>, // approved doc IDs per collection
+        num_docs: Map<felt252, u32>,
+        doc_ids: Map<(felt252, u32), felt252>,
+        approved_docs: Map<felt252, u32>, // count of approved docs per collection
+        approved_doc_ids: Map<(felt252, u32), felt252>, // approved doc IDs per collection
         
         // Indexing System
-        num_indexed: LegacyMap<felt252, felt252>,
-        indexed_fields: LegacyMap<(felt252, felt252), felt252>,
-        index_num_ids: LegacyMap<(felt252, felt252, felt252), u32>, // (collection, field, value) -> count
-        index_ids: LegacyMap<(felt252, felt252, felt252, u32), felt252>, // (collection, field, value, index) -> doc_id
+        num_indexed: Map<felt252, felt252>,
+        indexed_fields: Map<(felt252, felt252), felt252>,
+        index_num_ids: Map<(felt252, felt252, felt252), u32>, // (collection, field, value) -> count
+        index_ids: Map<(felt252, felt252, felt252, u32), felt252>, // (collection, field, value, index) -> doc_id
         
         // Validation and Reporting System
         next_report_id: felt252,
-        reports: LegacyMap<felt252, MaliciousReport>,
+        reports: Map<felt252, MaliciousReport>,
         pending_validations_count: u64,
-        pending_validation_ids: LegacyMap<u64, (felt252, felt252)>, // index -> (collection, doc_id)
+        pending_validation_ids: Map<u64, (felt252, felt252)>, // index -> (collection, doc_id)
         
         // Original Statistics
         total_accounts_registered: u64,
@@ -781,8 +782,8 @@ mod GurftronDB {
     #[constructor]
     fn constructor(ref self: ContractState, admin_addr: ContractAddress, strk_token_addr: ContractAddress) {
         // Validate addresses
-        assert(!admin_addr.is_zero(), 'Admin address cannot be zero');
-        assert(!strk_token_addr.is_zero(), 'STRK token address cannot be zero');
+        assert(!admin_addr.is_zero(), "Admin address cannot be zero");
+        assert(!strk_token_addr.is_zero(), "STRK token address cannot be zero");
         
         // Set core addresses
         self.admin_address.write(admin_addr);
@@ -805,9 +806,9 @@ mod GurftronDB {
         self.action_cooldown_period.write(ACTION_COOLDOWN_PERIOD);
         self.minimum_reputation_score.write(MINIMUM_REPUTATION_SCORE);
         self.max_pending_time.write(MAX_PENDING_TIME);
-        self.approval_percentage.write(APPROVAL_PERCENTAGE as i32);
-        self.slash_percentage.write(SLASH_PERCENTAGE as i32);
-        self.transaction_fee_percent.write(TRANSACTION_FEE_PERCENT as i32);
+        self.approval_percentage.write(APPROVAL_PERCENTAGE.try_into().unwrap());
+        self.slash_percentage.write(SLASH_PERCENTAGE.try_into().unwrap());
+        self.transaction_fee_percent.write(TRANSACTION_FEE_PERCENT.try_into().unwrap());
         
         // Initialize statistics
         self.total_accounts_registered.write(0);
@@ -825,19 +826,27 @@ mod GurftronDB {
     // ============================================================================
     #[generate_trait]
     impl ModifierImpl of ModifierTrait {
+
+        /// @notice Ensures caller is admin or moderator
+        fn only_moderator_or_admin(self: @ContractState) {
+            let caller = get_caller_address();
+            let admin_addr = self.admin_address.read();
+            assert(caller == admin_addr || self.moderators.read(caller), "Not admin or moderator");
+        }
+
         /// @notice Ensures caller is admin
         fn only_admin(self: @ContractState) {
             let caller = get_caller_address();
             let admin_addr = self.admin_address.read();
-            assert(caller == admin_addr, 'Caller is not admin');
+            assert(caller == admin_addr, "Caller is not admin");
         }
         
         /// @notice Ensures user is registered and not banned
         fn only_registered_non_banned(self: @ContractState) {
             let caller = get_caller_address();
-            assert(self.accounts.read(caller) != 0, 'Account not registered');
-            assert(!self.banned_users.read(caller), 'User is banned');
-            assert(!self.is_circuit_breaker_active.read(), 'System maintenance mode');
+            assert(self.accounts.read(caller) != 0, "Account not registered");
+            assert(!self.banned_users.read(caller), "User is banned");
+            assert(!self.is_circuit_breaker_active.read(), "System maintenance mode");
         }
         
         /// @notice Ensures user has sufficient stake
@@ -845,8 +854,8 @@ mod GurftronDB {
             let caller = get_caller_address();
             let stake_info = self.user_stakes.read(caller);
             let min_stake = self.minimum_stake_amount.read();
-            assert(stake_info.amount >= min_stake, 'Insufficient stake amount');
-            assert(!stake_info.is_locked, 'Stake is locked');
+            assert(stake_info.amount >= min_stake, "Insufficient stake amount");
+            assert(!stake_info.is_locked, "Stake is locked");
         }
         
         /// @notice Ensures user has sufficient reputation
@@ -854,7 +863,7 @@ mod GurftronDB {
             let caller = get_caller_address();
             let profile = self.user_profiles.read(caller);
             let min_rep = self.minimum_reputation_score.read();
-            assert(profile.reputation_score >= min_rep, 'Reputation too low');
+            assert(profile.reputation_score >= min_rep, "Reputation too low");
         }
         
         /// @notice Ensures user can perform read operations
@@ -862,18 +871,18 @@ mod GurftronDB {
             let caller = get_caller_address();
             let is_premium = self.is_user_premium.read(caller);
             let points = self.points.read(caller);
-            assert(!self.banned_users.read(caller), 'User is banned');
-            assert(is_premium || points >= 0, 'Negative balance - upgrade to premium');
+            assert(!self.banned_users.read(caller), "User is banned");
+            assert(is_premium || points >= 0, "Negative balance - upgrade to premium");
         }
         
         /// @notice Validates field array length
         fn validate_fields(self: @ContractState, fields: @Array<(felt252, felt252)>) {
-            assert(fields.len() <= MAXIMUM_FIELD_LENGTH, 'Too many fields');
+            assert(fields.len() <= MAXIMUM_FIELD_LENGTH, "Too many fields");
         }
         
         /// @notice Validates query conditions length
         fn validate_query(self: @ContractState, query: @Array<(felt252, felt252, felt252, felt252)>) {
-            assert(query.len() <= MAX_QUERY_CONDITIONS, 'Too many query conditions');
+            assert(query.len() <= MAX_QUERY_CONDITIONS, "Too many query conditions");
         }
         
         /// @notice Enforces action cooldown
@@ -890,7 +899,7 @@ mod GurftronDB {
                     last_action, 
                     current_time 
                 });
-                assert(false, 'Action on cooldown');
+                assert(false, "Action on cooldown");
             }
             
             self.user_last_actions.write((caller, action_type), current_time);
@@ -911,7 +920,7 @@ mod GurftronDB {
                     max_allowed: max_per_hour,
                     hour_window: current_hour
                 });
-                assert(false, 'Rate limit exceeded');
+                assert(false, "Rate limit exceeded");
             }
             
             self.user_hourly_actions.write((caller, action_type, current_hour), current_count + 1);
@@ -919,8 +928,8 @@ mod GurftronDB {
         
         /// @notice Validates data integrity and size
         fn validate_data(self: @ContractState, data: @ByteArray) {
-            assert(data.len() > 0, 'Data cannot be empty');
-            assert(data.len() <= MAXIMUM_DATA_SIZE, 'Data size exceeds limit');
+            assert(data.len() > 0, "Data cannot be empty");
+            assert(data.len() <= MAXIMUM_DATA_SIZE, "Data size exceeds limit");
         }
     }
 
@@ -932,15 +941,15 @@ mod GurftronDB {
     #[external(v0)]
     fn deposit_funds(ref self: ContractState, amount: u256) {
         self.only_admin();
-        assert(amount > 0, 'Amount must be greater than 0');
+        assert(amount > 0, "Amount must be greater than 0");
         
         let caller = get_caller_address();
         let strk_token = IERC20Dispatcher { contract_address: self.strk_token_address.read() };
         let contract_addr = get_contract_address();
         let success = strk_token.transfer_from(caller, contract_addr, amount);
-        assert(success, 'Transfer failed');
+        assert(success, "Transfer failed");
         
-        self.emit(FundsDepositedEvent { admin: caller, amount });
+        self.emit(FundsDepositedEvent { admin: caller, amount, timestamp: get_block_timestamp() });
     }
     
     /// @notice Sets premium status for a user (Admin only)
@@ -949,11 +958,11 @@ mod GurftronDB {
     #[external(v0)]
     fn set_user_premium_status(ref self: ContractState, user_address: ContractAddress, is_premium: bool) {
         self.only_admin();
-        assert(!user_address.is_zero(), 'Invalid user address');
+        assert(!user_address.is_zero(), "Invalid user address");
         
         let caller = get_caller_address();
         self.is_user_premium.write(user_address, is_premium);
-        self.emit(PremiumStatusSet { account: user_address, is_premium, admin: caller });
+        self.emit(PremiumStatusSet { account: user_address, is_premium, admin: caller, timestamp: get_block_timestamp() });
     }
     
     /// @notice Emergency circuit breaker to pause system (Admin only)
@@ -982,7 +991,7 @@ mod GurftronDB {
         /// @param moderator Address to grant moderator role
         fn add_moderator(ref self: ContractState, moderator: ContractAddress) {
             self.only_admin();
-            assert(!moderator.is_zero(), 'Invalid moderator address');
+            assert(!moderator.is_zero(), "Invalid moderator address");
             self.moderators.write(moderator, true);
         }
         
@@ -990,15 +999,8 @@ mod GurftronDB {
         /// @param moderator Address to remove moderator role
         fn remove_moderator(ref self: ContractState, moderator: ContractAddress) {
             self.only_admin();
-            assert(!moderator.is_zero(), 'Invalid moderator address');
+            assert(!moderator.is_zero(), "Invalid moderator address");
             self.moderators.write(moderator, false);
-        }
-        
-        /// @notice Ensures caller is admin or moderator
-        fn only_moderator_or_admin(self: @ContractState) {
-            let caller = get_caller_address();
-            let admin_addr = self.admin_address.read();
-            assert(caller == admin_addr || self.moderators.read(caller), 'Not admin or moderator');
         }
         
         /// @notice Stakes STRK tokens for database access
@@ -1006,13 +1008,13 @@ mod GurftronDB {
         fn stake_for_access(ref self: ContractState, amount: u256) {
             let caller = get_caller_address();
             let min_stake = self.minimum_stake_amount.read();
-            assert(amount >= min_stake, 'Stake amount too low');
+            assert(amount >= min_stake, "Stake amount too low");
             
             // Transfer STRK tokens to contract
             let strk_token = IERC20Dispatcher { contract_address: self.strk_token_address.read() };
             let contract_addr = get_contract_address();
             let success = strk_token.transfer_from(caller, contract_addr, amount);
-            assert(success, 'Stake transfer failed');
+            assert(success, "Stake transfer failed");
             
             let current_time = get_block_timestamp();
             let lock_period = self.stake_lock_period.read();
@@ -1042,9 +1044,9 @@ mod GurftronDB {
             let stake_info = self.user_stakes.read(caller);
             let current_time = get_block_timestamp();
             
-            assert(stake_info.amount > 0, 'No stake to withdraw');
-            assert(current_time >= stake_info.unlock_time, 'Stake still locked');
-            assert(!stake_info.is_locked, 'Stake locked due to disputes');
+            assert(stake_info.amount > 0, "No stake to withdraw");
+            assert(current_time >= stake_info.unlock_time, "Stake still locked");
+            assert(!stake_info.is_locked, "Stake locked due to disputes");
             
             let amount = stake_info.amount;
             
@@ -1059,7 +1061,7 @@ mod GurftronDB {
             // Transfer STRK back to user
             let strk_token = IERC20Dispatcher { contract_address: self.strk_token_address.read() };
             let success = strk_token.transfer(caller, amount);
-            assert(success, 'Withdraw transfer failed');
+            assert(success, "Withdraw transfer failed");
             
             self.emit(StakeWithdrawnEvent { 
                 staker: caller, 
@@ -1094,18 +1096,18 @@ mod GurftronDB {
             self.check_reputation();
             self.enforce_cooldown('create_collection');
             
-            assert(name != 0, 'Collection name cannot be empty');
-            assert(indexed_fields.len() <= MAX_INDEXED_FIELDS, 'Too many indexed fields');
+            assert(name != 0, "Collection name cannot be empty");
+            assert(indexed_fields.len() <= MAX_INDEXED_FIELDS, "Too many indexed fields");
             
             let caller = get_caller_address();
             let len: felt252 = indexed_fields.len().try_into().unwrap();
             
             // Store indexed fields
             self.num_indexed.write(name, len);
-            let mut i: felt252 = 0;
+            let mut i: u32 = 0;
             while i < len {
                 let field = *indexed_fields.at(i.try_into().unwrap());
-                assert(field != 0, 'Field name cannot be empty');
+                assert(field != 0, "Field name cannot be empty");
                 self.indexed_fields.write((name, i), field);
                 i += 1;
             }
@@ -1137,14 +1139,14 @@ mod GurftronDB {
             self.validate_fields(@fields);
             self.validate_data(@compressed_data);
             
-            assert(collection != 0, 'Collection name cannot be empty');
+            assert(collection != 0, "Collection name cannot be empty");
             let caller = get_caller_address();
             let timestamp = get_block_timestamp();
             
             // Check user document limit (premium users have no limit)
             let profile = self.user_profiles.read(caller);
             if !self.is_user_premium.read(caller) {
-                assert(profile.total_documents < MAXIMUM_DOCUMENTS_PER_USER, 'Document limit reached');
+                assert(profile.total_documents < MAXIMUM_DOCUMENTS_PER_USER, "Document limit reached");
             }
             
             // Generate document ID and update collection
@@ -1210,12 +1212,12 @@ mod GurftronDB {
         fn get(self: @ContractState, collection: felt252, id: felt252) -> (ByteArray, Array<(felt252, felt252)>) {
             self.can_read();
             let doc = self.documents.read((collection, id));
-            assert(!doc.creator.is_zero(), 'Document not found');
+            assert(!doc.creator.is_zero(), "Document not found");
             
             // Only allow approved documents for non-admin users
             let caller = get_caller_address();
             if caller != self.admin_address.read() {
-                assert(doc.validation_status == 'approved', 'Document not approved');
+                assert(doc.validation_status == "approved", "Document not approved");
             }
             
             let fields = self._get_document_fields(collection, id);
@@ -1244,8 +1246,8 @@ mod GurftronDB {
             
             let caller = get_caller_address();
             let creator = self.creators.read((collection, id));
-            assert(!creator.is_zero(), 'Document not found');
-            assert(caller == creator, 'Only creator can update');
+            assert(!creator.is_zero(), "Document not found");
+            assert(caller == creator, "Only creator can update");
             
             // Deduct points if not premium
             self._charge_update_points(caller);
@@ -1301,8 +1303,8 @@ mod GurftronDB {
             
             let caller = get_caller_address();
             let creator = self.creators.read((collection, id));
-            assert(!creator.is_zero(), 'Document not found');
-            assert(caller == creator, 'Only creator can delete');
+            assert(!creator.is_zero(), "Document not found");
+            assert(caller == creator, "Only creator can delete");
             
             // Deduct points if not premium
             self._charge_delete_points(caller);
@@ -1351,7 +1353,7 @@ mod GurftronDB {
         ) -> Array<felt252> {
             self.can_read();
             self.validate_query(@query);
-            assert(page > 0, 'Page must be >= 1');
+            assert(page > 0, "Page must be >= 1");
             
             let caller = get_caller_address();
             self.enforce_rate_limit('query', MAX_QUERIES_PER_HOUR);
@@ -1412,7 +1414,7 @@ mod GurftronDB {
         ) -> Array<felt252> {
             self.only_admin();
             self.validate_query(@query);
-            assert(page > 0, 'Page must be >= 1');
+            assert(page > 0, "Page must be >= 1");
             
             let candidates = self._process_query(collection, @query);
             self._paginate_results(@candidates, page)
@@ -1445,13 +1447,13 @@ mod GurftronDB {
             self.enforce_rate_limit('vote', MAX_VOTES_PER_HOUR);
             
             let caller = get_caller_address();
-            assert(!caller.is_zero(), 'Zero address cannot vote');
+            assert(!caller.is_zero(), "Zero address cannot vote");
             
             let mut doc = self.documents.read((collection, doc_id));
-            assert(!doc.creator.is_zero(), 'Document not found');
-            assert(doc.validation_status == 'pending', 'Document not pending validation');
-            assert(doc.creator != caller, 'Cannot vote on own document');
-            assert(!self.document_voters.read((collection, doc_id, caller)), 'Already voted on this document');
+            assert(!doc.creator.is_zero(), "Document not found");
+            assert(doc.validation_status == "pending", "Document not pending validation");
+            assert(doc.creator != caller, "Cannot vote on own document");
+            assert(!self.document_voters.read((collection, doc_id, caller)), "Already voted on this document");
             
             // Record the vote
             self.document_voters.write((collection, doc_id, caller), true);
@@ -1508,7 +1510,7 @@ mod GurftronDB {
             doc_id: felt252
         ) -> (felt252, u32, u32, u32) {
             let doc = self.documents.read((collection, doc_id));
-            assert(!doc.creator.is_zero(), 'Document not found');
+            assert(!doc.creator.is_zero(), "Document not found");
             (doc.validation_status, doc.positive_votes, doc.negative_votes, doc.total_voters)
         }
         
@@ -1519,12 +1521,12 @@ mod GurftronDB {
         fn report_malicious_data(ref self: ContractState, collection: felt252, doc_id: felt252, reason: felt252) {
             self.only_registered_non_banned();
             self.only_staked_users();
-            assert(reason != 0, 'Reason cannot be empty');
+            assert(reason != 0, "Reason cannot be empty");
             
             let caller = get_caller_address();
             let doc = self.documents.read((collection, doc_id));
-            assert(!doc.creator.is_zero(), 'Document not found');
-            assert(doc.creator != caller, 'Cannot report own document');
+            assert(!doc.creator.is_zero(), "Document not found");
+            assert(doc.creator != caller, "Cannot report own document");
             
             let report_id = self.next_report_id.read();
             self.next_report_id.write(report_id + 1);
@@ -1559,14 +1561,14 @@ mod GurftronDB {
         /// @param page Page number
         /// @return Array<(felt252, felt252)> Array of (collection, doc_id) pairs
         fn get_pending_validations(self: @ContractState, page: u32) -> Array<(felt252, felt252)> {
-            assert(page > 0, 'Page must be >= 1');
+            assert(page > 0, "Page must be >= 1");
             
             let mut result = ArrayTrait::new();
             let total_pending = self.pending_validations_count.read();
             let start_idx = (page - 1) * 10; // 10 results per page
             let end_idx = if start_idx + 10 > total_pending { total_pending } else { start_idx + 10 };
             
-            let mut i = start_idx;
+            let mut i: u64 = start_idx;
             while i < end_idx {
                 let (collection, doc_id) = self.pending_validation_ids.read(i);
                 let doc = self.documents.read((collection, doc_id));
@@ -1589,12 +1591,12 @@ mod GurftronDB {
             self.enforce_rate_limit('whitelist_vote', MAX_VOTES_PER_HOUR);
             
             let voter = get_caller_address();
-            assert(!voter.is_zero(), 'Zero address cannot vote');
+            assert(!voter.is_zero(), "Zero address cannot vote");
             
             let mut doc = self.documents.read((collection, doc_id));
-            assert(!doc.creator.is_zero() && doc.validation_status != 'deleted', 'Document not found or deleted');
-            assert(doc.creator != voter, 'Cannot vote on own document');
-            assert(!self.whitelist_voters.read((collection, doc_id, voter)), 'Already voted on whitelist');
+            assert(!doc.creator.is_zero() && doc.validation_status != "deleted", "Document not found or deleted");
+            assert(doc.creator != voter, "Cannot vote on own document");
+            assert(!self.whitelist_voters.read((collection, doc_id, voter)), "Already voted on whitelist");
             
             // Record the vote
             self.whitelist_voters.write((collection, doc_id, voter), true);
@@ -1639,8 +1641,8 @@ mod GurftronDB {
         /// @notice Registers a user account
         fn register_account(ref self: ContractState) {
             let caller = get_caller_address();
-            assert(!caller.is_zero(), 'Cannot register zero address');
-            assert(self.accounts.read(caller) == 0, 'Account already registered');
+            assert(!caller.is_zero(), "Cannot register zero address");
+            assert(self.accounts.read(caller) == 0, "Account already registered");
             
             let timestamp = get_block_timestamp();
             self.accounts.write(caller, timestamp);
@@ -1668,7 +1670,7 @@ mod GurftronDB {
         /// @param user_address Address to ban
         fn ban_user(ref self: ContractState, user_address: ContractAddress) {
             self.only_admin();
-            assert(!user_address.is_zero(), 'Cannot ban zero address');
+            assert(!user_address.is_zero(), "Cannot ban zero address");
             
             let caller = get_caller_address();
             self.banned_users.write(user_address, true);
@@ -1691,7 +1693,7 @@ mod GurftronDB {
         /// @param user_address Address to unban
         fn unban_user(ref self: ContractState, user_address: ContractAddress) {
             self.only_admin();
-            assert(!user_address.is_zero(), 'Cannot unban zero address');
+            assert(!user_address.is_zero(), "Cannot unban zero address");
             
             let caller = get_caller_address();
             self.banned_users.write(user_address, false);
@@ -1770,14 +1772,14 @@ mod GurftronDB {
             self.only_admin();
             
             // Validate all parameters
-            assert(new_points_per_insert > 0, 'Points per insert must be > 0');
-            assert(new_points_per_update > 0, 'Points per update must be > 0');
-            assert(new_points_per_delete > 0, 'Points per delete must be > 0');
-            assert(new_points_per_query_page > 0, 'Points per query page must be > 0');
-            assert(new_points_threshold_for_claim > 0, 'Claim threshold must be > 0');
-            assert(new_premium_reward_multiplier > 0, 'Premium multiplier must be > 0');
-            assert(new_badge_threshold > 0, 'Badge threshold must be > 0');
-            assert(new_points_to_strk_wei > 0, 'Points to STRK ratio must be > 0');
+            assert(new_points_per_insert > 0, "Points per insert must be > 0");
+            assert(new_points_per_update > 0, "Points per update must be > 0");
+            assert(new_points_per_delete > 0, "Points per delete must be > 0");
+            assert(new_points_per_query_page > 0, "Points per query page must be > 0");
+            assert(new_points_threshold_for_claim > 0, "Claim threshold must be > 0");
+            assert(new_premium_reward_multiplier > 0, "Premium multiplier must be > 0");
+            assert(new_badge_threshold > 0, "Badge threshold must be > 0");
+            assert(new_points_to_strk_wei > 0, "Points to STRK ratio must be > 0");
             
             // Update all parameters
             self.points_per_insert.write(new_points_per_insert);
@@ -1817,11 +1819,11 @@ mod GurftronDB {
         ) {
             self.only_admin();
             
-            assert(min_stake > 0, 'Minimum stake must be > 0');
-            assert(stake_lock_period > 0, 'Lock period must be > 0');
-            assert(approval_percentage <= 100, 'Invalid approval percentage');
-            assert(slash_percentage <= 100, 'Invalid slash percentage');
-            assert(transaction_fee_percent <= 100, 'Invalid fee percentage');
+            assert(min_stake > 0, "Minimum stake must be > 0");
+            assert(stake_lock_period > 0, "Lock period must be > 0");
+            assert(approval_percentage <= 100, "Invalid approval percentage");
+            assert(slash_percentage <= 100, "Invalid slash percentage");
+            assert(transaction_fee_percent <= 100, "Invalid fee percentage");
             
             self.minimum_stake_amount.write(min_stake);
             self.stake_lock_period.write(stake_lock_period);
@@ -1855,7 +1857,7 @@ mod GurftronDB {
             let caller = get_caller_address();
             
             let mut stake_info = self.user_stakes.read(user);
-            assert(stake_info.amount >= amount, 'Insufficient stake to slash');
+            assert(stake_info.amount >= amount, "Insufficient stake to slash");
             
             stake_info.amount -= amount;
             stake_info.is_locked = true; // Lock remaining stake
@@ -1912,9 +1914,9 @@ mod GurftronDB {
             let caller = get_caller_address();
             
             let doc = self.documents.read((collection, doc_id));
-            assert(!doc.creator.is_zero(), 'Document not found');
-            assert(doc.whitelist_approved_for_deletion, 'Document not approved for deletion');
-            assert(caller == doc.creator || caller == self.admin_address.read(), 'Unauthorized');
+            assert(!doc.creator.is_zero(), "Document not found");
+            assert(doc.whitelist_approved_for_deletion, "Document not approved for deletion");
+            assert(caller == doc.creator || caller == self.admin_address.read(), "Unauthorized");
             
             // Deduct points if not premium
             self._charge_delete_points(caller);
@@ -1957,25 +1959,25 @@ mod GurftronDB {
     #[external(v0)]
     fn claim_reward(ref self: ContractState) {
         let caller = get_caller_address();
-        assert(!self.banned_users.read(caller), 'User is banned');
-        assert(!self.is_circuit_breaker_active.read(), 'System maintenance mode');
+        assert(!self.banned_users.read(caller), "User is banned");
+        assert(!self.is_circuit_breaker_active.read(), "System maintenance mode");
         
         let profile = self.user_profiles.read(caller);
-        assert(profile.reputation_score >= 0, 'Reputation too low for claims');
-        assert(profile.warning_count < 5, 'Too many warnings');
+        assert(profile.reputation_score >= 0, "Reputation too low for claims");
+        assert(profile.warning_count < 5, "Too many warnings");
         
         let stake_info = self.user_stakes.read(caller);
         let min_stake = self.minimum_stake_amount.read();
-        assert(stake_info.amount >= min_stake, 'Must maintain minimum stake');
-        assert(!stake_info.is_locked, 'Stake is locked');
+        assert(stake_info.amount >= min_stake, "Must maintain minimum stake");
+        assert(!stake_info.is_locked, "Stake is locked");
         
         let current_points = self.points.read(caller);
         let claim_threshold = self.points_threshold_for_claim.read();
-        assert(current_points >= claim_threshold.try_into().unwrap(), 'Insufficient points');
+        assert(current_points >= claim_threshold.try_into().unwrap(), "Insufficient points");
         
         let fee_points = (current_points * TRANSACTION_FEE_PERCENT.into()) / 100;
         let points_after_fee = current_points - fee_points;
-        assert(points_after_fee >= claim_threshold.try_into().unwrap(), 'Insufficient points after fee');
+        assert(points_after_fee >= claim_threshold.try_into().unwrap(), "Insufficient points after fee");
         
         let points_to_strk = self.points_to_strk_wei.read();
         let base_reward: u256 = points_after_fee.try_into().unwrap() * points_to_strk;
@@ -2015,7 +2017,7 @@ mod GurftronDB {
         // Transfer tokens last
         let strk_token = IERC20Dispatcher { contract_address: self.strk_token_address.read() };
         let success = strk_token.transfer(caller, reward_amount);
-        assert(success, 'Transfer failed');
+        assert(success, "Transfer failed");
     }
 
     // ============================================================================
@@ -2128,7 +2130,7 @@ mod GurftronDB {
         let num_indexed = self.num_indexed.read(collection);
         
         let mut indexed_fields = ArrayTrait::new();
-        let mut i: felt252 = 0;
+        let mut i: u32 = 0; 
         while i < num_indexed {
             indexed_fields.append(self.indexed_fields.read((collection, i)));
             i += 1;
@@ -2230,7 +2232,7 @@ mod GurftronDB {
             }
             
             // Calculate required votes (60% of total users)
-            let required_votes = ((total_users as u128) * (APPROVAL_PERCENTAGE as u128)) / 100;
+            let required_votes = (total_users * APPROVAL_PERCENTAGE as u64) / 100;
             let required_votes = required_votes.try_into().unwrap();
             
             if doc.positive_votes >= required_votes {
@@ -2311,7 +2313,7 @@ mod GurftronDB {
             // Consider slashing stake if multiple rejections
             if creator_profile.warning_count >= 3 {
                 let mut stake_info = self.user_stakes.read(doc.creator);
-                let slash_amount = stake_info.amount * (SLASH_PERCENTAGE as u128) / 100;
+                let slash_amount = (stake_info.amount * SLASH_PERCENTAGE.into()) / 100_u256;
                 let slash_amount = slash_amount.try_into().unwrap();
                 
                 stake_info.amount -= slash_amount;
@@ -2447,7 +2449,7 @@ mod GurftronDB {
             if !self.is_user_premium.read(account) {
                 let points_to_deduct = self.points_per_update.read();
                 let current_points = self.points.read(account);
-                assert(current_points >= points_to_deduct.try_into().unwrap(), 'Insufficient points for update');
+                assert(current_points >= points_to_deduct.try_into().unwrap(), "Insufficient points for update");
                 
                 let new_points = current_points - points_to_deduct.try_into().unwrap();
                 self.points.write(account, new_points);
@@ -2467,7 +2469,7 @@ mod GurftronDB {
             if !self.is_user_premium.read(account) {
                 let points_to_deduct = self.points_per_delete.read();
                 let current_points = self.points.read(account);
-                assert(current_points >= points_to_deduct.try_into().unwrap(), 'Insufficient points for delete');
+                assert(current_points >= points_to_deduct.try_into().unwrap(), "Insufficient points for delete");
                 
                 let new_points = current_points - points_to_deduct.try_into().unwrap();
                 self.points.write(account, new_points);
@@ -2486,7 +2488,7 @@ mod GurftronDB {
         fn _charge_query_points(self: @ContractState, account: ContractAddress) {
             let points_to_deduct = self.points_per_query_page.read();
             let current_points = self.points.read(account);
-            assert(current_points >= points_to_deduct.try_into().unwrap(), 'Insufficient points for query');
+            assert(current_points >= points_to_deduct.try_into().unwrap(), "Insufficient points for query");
             
             let new_points = current_points - points_to_deduct.try_into().unwrap();
             self.points.write(account, new_points);
@@ -2510,7 +2512,7 @@ mod GurftronDB {
             }
             
             // Calculate required votes (60% of total users)
-            let required_votes = ((total_users as u128) * (APPROVAL_PERCENTAGE as u128)) / 100;
+            let required_votes = (total_users * APPROVAL_PERCENTAGE as u64) / 100;
             let required_votes = required_votes.try_into().unwrap();
             
             if doc.whitelist_remove_votes >= required_votes {
@@ -2528,6 +2530,29 @@ mod GurftronDB {
                 });
             }
         }
+
+        /// @notice Cleans up documents pending validation beyond max_pending_time
+        /// @dev Admin-only function to reject stale pending documents
+        fn cleanup_stale_pending_documents(ref self: ContractState) {
+            self.only_admin();
+            
+            let total_pending = self.pending_validations_count.read();
+            let max_pending_time = self.max_pending_time.read();
+            let current_time = get_block_timestamp();
+            
+            let mut i = 0_u64;
+            while i < total_pending {
+                let (collection, doc_id) = self.pending_validation_ids.read(i);
+                let doc = self.documents.read((collection, doc_id));
+                
+                if doc.validation_status == 'pending' && (current_time - doc.created_at) > max_pending_time {
+                    self._reject_document(collection, doc_id);
+                }
+                
+                i += 1;
+            }
+        }
+    
         
         // ============================================================================
         // ORIGINAL HELPER FUNCTIONS (Enhanced with Security Checks)
@@ -2618,7 +2643,7 @@ mod GurftronDB {
             
             while i < len {
                 let (field, value) = *fields.at(i.try_into().unwrap());
-                assert(field != 0, 'Field name cannot be empty');
+                assert(field != 0, "Field name cannot be empty");
                 
                 self.fields_list.write((collection, id, i), field);
                 self.fields_data.write((collection, id, field), value);
@@ -2637,7 +2662,7 @@ mod GurftronDB {
         fn _get_document_fields(self: @ContractState, collection: felt252, id: felt252) -> Array<(felt252, felt252)> {
             let mut fields = ArrayTrait::new();
             let len = self.field_lengths.read((collection, id));
-            let mut i: felt252 = 0;
+            let mut i: u32 = 0; 
             
             while i < len {
                 let field = self.fields_list.read((collection, id, i));
@@ -2671,7 +2696,7 @@ mod GurftronDB {
         /// @notice Removes document from all indices
         fn _remove_from_all_indices(ref self: ContractState, collection: felt252, id: felt252) {
             let len = self.field_lengths.read((collection, id));
-            let mut i: felt252 = 0;
+            let mut i: u32 = 0;
             
             while i < len {
                 let field = self.fields_list.read((collection, id, i));
@@ -2717,7 +2742,7 @@ mod GurftronDB {
             // Clear document data
             self.documents.write((collection, id), Document {
                 compressed_data: Default::default(),
-                creator: Zeroable::zero(),
+                creator: ContractAddress::from(0),
                 created_at: 0,
                 updated_at: 0,
                 data_hash: 0,
@@ -2731,7 +2756,7 @@ mod GurftronDB {
                 whitelist_approved_for_deletion: false,
             });
             
-            self.creators.write((collection, id), Zeroable::zero());
+            self.creators.write((collection, id), ContractAddress::from(0));
             self.field_lengths.write((collection, id), 0);
             
             // Remove from document list
@@ -2943,39 +2968,17 @@ mod GurftronDB {
         }
     }
     
-    /// @notice Cleans up documents pending validation beyond max_pending_time
-    /// @dev Admin-only function to reject stale pending documents
-    fn cleanup_stale_pending_documents(ref self: ContractState) {
-        self.only_admin();
-        
-        let total_pending = self.pending_validations_count.read();
-        let max_pending_time = self.max_pending_time.read();
-        let current_time = get_block_timestamp();
-        
-        let mut i = 0_u64;
-        while i < total_pending {
-            let (collection, doc_id) = self.pending_validation_ids.read(i);
-            let doc = self.documents.read((collection, doc_id));
-            
-            if doc.validation_status == 'pending' && (current_time - doc.created_at) > max_pending_time {
-                self._reject_document(collection, doc_id);
-            }
-            
-            i += 1;
-        }
-    }
-    
     /// @notice Get documents requiring validation (for validators)
     #[external(v0)]
     fn get_documents_for_validation(self: @ContractState, page: u32) -> Array<(felt252, felt252, felt252, ContractAddress)> {
-        assert(page > 0, 'Page must be >= 1');
+        assert(page > 0, "Page must be >= 1");
         
         let mut result = ArrayTrait::new();
         let total_pending = self.pending_validations_count.read();
         let start_idx = (page - 1) * 10;
         let end_idx = if start_idx + 10 > total_pending { total_pending } else { start_idx + 10 };
         
-        let mut i = start_idx;
+        let mut i: u64 = start_idx;
         while i < end_idx {
             let (collection, doc_id) = self.pending_validation_ids.read(i);
             let doc = self.documents.read((collection, doc_id));
@@ -3048,7 +3051,7 @@ mod GurftronDB {
         let pending_count = self.pending_validations_count.read();
         let total_docs = self.total_documents_inserted.read();
         let pending_percentage = if total_docs > 0 { 
-            ((pending_count as u128) * 100) / (total_docs as u128)
+            ((pending_count as u64) * 100) / (total_docs as u64)
         } else { 0 };
         
         (
@@ -3102,7 +3105,7 @@ mod GurftronDB {
         (profile.total_votes_cast, profile.reputation_score, vote_power)
     }
     
-    /// @notice Check if document can be voted
+    /// @notice Check if document can be voted on
     #[external(v0)]
     fn can_vote_on_document(self: @ContractState, user: ContractAddress, collection: felt252, doc_id: felt252) -> bool {
         let doc = self.documents.read((collection, doc_id));
