@@ -3066,7 +3066,7 @@ mod GurftronDB {
         (profile.total_votes_cast, profile.reputation_score, vote_power)
     }
     
-    /// @notice Check if document can be voted on
+    /// @notice Check if document can be voted on it
     #[external(v0)]
     fn can_vote_on_document(self: @ContractState, user: ContractAddress, collection: felt252, doc_id: felt252) -> bool {
         let doc = self.documents.read((collection, doc_id));
