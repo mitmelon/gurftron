@@ -1,13 +1,14 @@
-use starknet::{ContractAddress, get_caller_address, get_block_timestamp, get_contract_address};
-use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess, StorageMapReadAccess, StorageMapWriteAccess};
-use core::array::{ArrayTrait, SpanTrait};
-use core::byte_array::ByteArrayTrait;
+use core::num::traits::Zero;
+use core::array::ArrayTrait;
+use core::byte_array::ByteArray;
 use core::option::OptionTrait;
 use core::traits::{TryInto, Into};
 use core::clone::Clone;
 use core::pedersen::pedersen;
 use core::poseidon::PoseidonTrait;
 use core::hash::{HashStateTrait, HashStateExTrait};
+use starknet::{ContractAddress, get_caller_address, get_block_timestamp, get_contract_address};
+use starknet::contract::ContractDispatcherTrait;
 
 
 /// @title IERC20 Interface for STRK token interactions
@@ -578,16 +579,7 @@ mod GurftronDB {
         // Storage structures
         Document, StakeInfo, UserProfile, MaliciousReport
     };
-    use core::num::traits::Zero;
-    use starknet::storage::{Map, StoragePointerReadAccess, StoragePointerWriteAccess};
-    use core::array::{ArrayTrait, SpanTrait};
-    use core::byte_array::ByteArrayTrait;
-    use core::option::OptionTrait;
-    use core::traits::{TryInto, Into};
-    use core::pedersen::pedersen;
-    use core::poseidon::PoseidonTrait;
-    use core::hash::{HashStateTrait, HashStateExTrait};
-
+   
     trait ModifierTrait {
         fn only_moderator_or_admin(self: @ContractState);
         fn only_admin(self: @ContractState);
