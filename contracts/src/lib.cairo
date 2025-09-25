@@ -1,2839 +1,731 @@
-// lib.cairo
-
-use starknet::{ContractAddress, get_caller_address, get_block_timestamp, get_contract_address};
-use starknet::contract::ContractDispatcherTrait;
-use core::array::ArrayTrait;
-use core::byte_array::ByteArray;
-use core::option::OptionTrait;
-use core::traits::{TryInto, Into};
-use core::clone::Clone;
-use core::pedersen::pedersen;
-use core::hash::{HashStateTrait, HashStateExTrait};
-
-/// @title IERC20 Interface for STRK token interactions
-/// @notice Interface for ERC20 token operations required by the contract
-#[starknet::interface]
-trait IERC20<TContractState> {
-    /// @notice Transfers tokens to a recipient
-    /// @param recipient The address to receive tokens
-    /// @param amount The amount of tokens to transfer
-    /// @return bool Success status
-    fn transfer(ref self: TContractState, recipient: ContractAddress, amount: u256) -> bool;
-    /// @notice Transfers tokens from sender to recipient (requires approval)
-    /// @param sender The address to send tokens from
-    /// @param recipient The address to receive tokens
-    /// @param amount The amount of tokens to transfer
-    /// @return bool Success status
-    fn transfer_from(ref self: TContractState, sender: ContractAddress, recipient: ContractAddress, amount: u256) -> bool;
-    /// @notice Returns the token balance of an account
-    /// @param account The address to query balance for
-    /// @return u256 The token balance
-    fn balance_of(self: @TContractState, account: ContractAddress) -> u256;
-}
-
-/// @title Enhanced Database Interface with Security Features
-/// @notice Core interface for database operations and user management with anti-abuse mechanisms
-#[starknet::interface]
-trait IDatabase<TContractState> {
-    // Moderators
-    fn add_moderator(ref self: TContractState, moderator: ContractAddress);
-    fn remove_moderator(ref self: TContractState, moderator: ContractAddress);
-    // Staking System
-    fn stake_for_access(ref self: TContractState, amount: u256);
-    fn withdraw_stake(ref self: TContractState);
-    fn get_stake_info(self: @TContractState, user: ContractAddress) -> (u256, u64, bool);
-    fn emergency_unlock_stake(ref self: TContractState, user: ContractAddress);
-    // Collection Management
-    fn create_collection(ref self: TContractState, name: felt252, indexed_fields: Array<felt252>);
-    // Document Operations with Enhanced Security
-    fn insert(ref self: TContractState, collection: felt252, compressed_data: ByteArray, fields: Array<(felt252, felt252)>) -> felt252;
-    fn get(self: @TContractState, collection: felt252, id: felt252) -> (ByteArray, Array<(felt252, felt252)>);
-    fn update(ref self: TContractState, collection: felt252, id: felt252, compressed_data: ByteArray, fields: Array<(felt252, felt252)>);
-    fn delete(ref self: TContractState, collection: felt252, id: felt252);
-    // Query Operations (Enhanced to filter approved data)
-    fn find(self: @TContractState, collection: felt252, query: Array<(felt252, felt252, felt252, felt252)>, page: u32) -> Array<felt252>;
-    fn find_one(self: @TContractState, collection: felt252, query: Array<(felt252, felt252, felt252, felt252)>) -> (ByteArray, Array<(felt252, felt252)>);
-    fn get_all_data(self: @TContractState, collection: felt252) -> Array<felt252>;
-    // Admin-only query functions (includes pending data)
-    fn admin_find(self: @TContractState, collection: felt252, query: Array<(felt252, felt252, felt252, felt252)>, page: u32) -> Array<felt252>;
-    fn admin_get_all_data(self: @TContractState, collection: felt252) -> Array<felt252>;
-    // Validation and Voting System
-    fn vote_on_document(ref self: TContractState, collection: felt252, doc_id: felt252, is_valid: bool);
-    fn vote_on_whitelist(ref self: TContractState, collection: felt252, doc_id: felt252, vote_remove: bool);
-    fn get_document_validation_status(self: @TContractState, collection: felt252, doc_id: felt252) -> (felt252, u32, u32, u32);
-    fn report_malicious_data(ref self: TContractState, collection: felt252, doc_id: felt252, reason: felt252);
-    fn get_pending_validations(self: @TContractState, page: u32) -> Array<(felt252, felt252)>; // (collection, doc_id) pairs
-    // User Management (Enhanced)
-    fn register_account(ref self: TContractState);
-    fn ban_user(ref self: TContractState, user_address: ContractAddress);
-    fn unban_user(ref self: TContractState, user_address: ContractAddress);
-    fn get_user_profile(self: @TContractState, user: ContractAddress) -> (i32, u32, u32, bool, u64);
-    // Statistics Methods (Enhanced)
-    fn get_total_accounts_registered(self: @TContractState) -> u64;
-    fn get_total_documents_inserted(self: @TContractState) -> u64;
-    fn get_total_database_size_bytes(self: @TContractState) -> u256;
-    fn get_security_statistics(self: @TContractState) -> (u256, u64, u64, u64);
-    // Admin Functions (Enhanced)
-    fn update_all_parameters(
-        ref self: TContractState,
-        new_points_per_insert: u32,
-        new_points_per_update: u32,
-        new_points_per_delete: u32,
-        new_points_per_query_page: u32,
-        new_points_threshold_for_claim: u32,
-        new_premium_reward_multiplier: u32,
-        new_badge_threshold: u32,
-        new_points_to_strk_wei: u256
-    );
-    fn update_security_parameters(
-        ref self: TContractState, 
-        min_stake: u256, 
-        stake_lock_period: u64, 
-        cooldown_period: u64, 
-        min_reputation: i32,
-        max_pending_time: u64,
-        approval_percentage: i32,
-        slash_percentage: i32,
-        transaction_fee_percent: i32
-    );
-    fn slash_malicious_stake(ref self: TContractState, user: ContractAddress, amount: u256, reason: felt252);
-    fn force_approve_document(ref self: TContractState, collection: felt252, doc_id: felt252);
-    fn force_reject_document(ref self: TContractState, collection: felt252, doc_id: felt252);
-    fn delete_whitelisted_document(ref self: TContractState, collection: felt252, doc_id: felt252);
-    fn cleanup_stale_pending_documents(ref self: TContractState);
-}
-
-/// @title Enhanced Event Definitions with Specific Names
-/// @notice All events emitted by the contract for tracking operations and rewards
-// Document Lifecycle Events
-#[derive(Drop, starknet::Event)]
-struct DocumentInsertedEvent {
-    #[key]
-    caller: ContractAddress,
-    #[key]
-    collection: felt252,
-    #[key]
-    document_id: felt252,
-    data_hash: felt252,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct DocumentUpdatedEvent {
-    #[key]
-    caller: ContractAddress,
-    #[key]
-    collection: felt252,
-    #[key]
-    document_id: felt252,
-    old_data_hash: felt252,
-    new_data_hash: felt252,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct DocumentDeletedEvent {
-    #[key]
-    caller: ContractAddress,
-    #[key]
-    collection: felt252,
-    #[key]
-    document_id: felt252,
-    data_hash: felt252,
-    creator: ContractAddress,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct DocumentApprovedEvent {
-    #[key]
-    collection: felt252,
-    #[key]
-    document_id: felt252,
-    #[key]
-    creator: ContractAddress,
-    positive_votes: u32,
-    total_votes: u32,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct DocumentRejectedEvent {
-    #[key]
-    collection: felt252,
-    #[key]
-    document_id: felt252,
-    #[key]
-    creator: ContractAddress,
-    negative_votes: u32,
-    total_votes: u32,
-    timestamp: u64,
-}
-// Voting Events
-#[derive(Drop, starknet::Event)]
-struct DocumentVoteSubmitted {
-    #[key]
-    voter: ContractAddress,
-    #[key]
-    collection: felt252,
-    #[key]
-    document_id: felt252,
-    #[key]
-    creator: ContractAddress,
-    is_valid: bool,
-    positive_votes: u32,
-    negative_votes: u32,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct WhitelistVoteSubmitted {
-    #[key]
-    voter: ContractAddress,
-    #[key]
-    collection: felt252,
-    #[key]
-    document_id: felt252,
-    #[key]
-    creator: ContractAddress,
-    vote_remove: bool,
-    remove_votes: u32,
-    keep_votes: u32,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct DocumentWhitelistApproved {
-    #[key]
-    collection: felt252,
-    #[key]
-    document_id: felt252,
-    #[key]
-    creator: ContractAddress,
-    data_hash: felt252,
-    remove_votes: u32,
-    total_votes: u32,
-    timestamp: u64,
-}
-// Points and Rewards Events
-#[derive(Drop, starknet::Event)]
-struct PointsAwardedForApproval {
-    #[key]
-    recipient: ContractAddress,
-    #[key]
-    collection: felt252,
-    #[key]
-    document_id: felt252,
-    points_awarded: u32,
-    total_points: i32,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct PointsAwardedForVoting {
-    #[key]
-    voter: ContractAddress,
-    #[key]
-    collection: felt252,
-    #[key]
-    document_id: felt252,
-    points_awarded: u32,
-    total_points: i32,
-    vote_type: felt252, // 'approval' or 'whitelist'
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct BadgeEarnedEvent {
-    #[key]
-    recipient: ContractAddress,
-    badge_id: u64,
-    points_threshold: u32,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct RewardClaimedEvent {
-    #[key]
-    claimant: ContractAddress,
-    reward_amount: u256,
-    points_used: i32,
-    is_premium_bonus: bool,
-    timestamp: u64,
-}
-// User Management Events
-#[derive(Drop, starknet::Event)]
-struct UserRegisteredEvent {
-    #[key]
-    new_user: ContractAddress,
-    registration_timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct UserBannedEvent {
-    #[key]
-    banned_user: ContractAddress,
-    #[key]
-    admin: ContractAddress,
-    reason: felt252,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct UserUnbannedEvent {
-    #[key]
-    unbanned_user: ContractAddress,
-    #[key]
-    admin: ContractAddress,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct PremiumStatusChangedEvent {
-    #[key]
-    user: ContractAddress,
-    #[key]
-    admin: ContractAddress,
-    is_premium: bool,
-    timestamp: u64,
-}
-// Staking Events
-#[derive(Drop, starknet::Event)]
-struct StakeDepositedEvent {
-    #[key]
-    staker: ContractAddress,
-    amount: u256,
-    unlock_time: u64,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct StakeWithdrawnEvent {
-    #[key]
-    staker: ContractAddress,
-    amount: u256,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct StakeSlashedEvent {
-    #[key]
-    penalized_user: ContractAddress,
-    #[key]
-    admin: ContractAddress,
-    slashed_amount: u256,
-    reason: felt252,
-    timestamp: u64,
-}
-// System Events
-#[derive(Drop, starknet::Event)]
-struct CollectionCreatedEvent {
-    #[key]
-    creator: ContractAddress,
-    collection_name: felt252,
-    indexed_fields_count: u32,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct FundsDepositedEvent {
-    #[key]
-    admin: ContractAddress,
-    amount: u256,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct SystemPausedEvent {
-    #[key]
-    admin: ContractAddress,
-    reason: felt252,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct SystemResumedEvent {
-    #[key]
-    admin: ContractAddress,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct ReputationChangedEvent {
-    #[key]
-    user: ContractAddress,
-    old_reputation: i32,
-    new_reputation: i32,
-    reason: felt252,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct SecurityViolationEvent {
-    #[key]
-    violator: ContractAddress,
-    violation_type: felt252, // 'cooldown', 'rate_limit', 'reputation'
-    details: felt252,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct CooldownViolation {
-    #[key]
-    user: ContractAddress,
-    action_type: felt252,
-    last_action: u64,
-    current_time: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct RateLimitExceeded {
-    #[key]
-    user: ContractAddress,
-    action_type: felt252,
-    current_count: u32,
-    max_allowed: u32,
-    hour_window: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct PointsDeducted {
-    #[key]
-    account: ContractAddress,
-    points: u32,
-    total_points: i32,
-    action_type: felt252,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct MaliciousDataReported {
-    #[key]
-    reporter: ContractAddress,
-    #[key]
-    collection: felt252,
-    #[key]
-    doc_id: felt252,
-    creator: ContractAddress,
-    reason: felt252,
-    report_id: felt252,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct CircuitBreakerTriggered {
-    #[key]
-    admin: ContractAddress,
-    reason: felt252,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct PointsAwarded {
-    #[key]
-    account: ContractAddress,
-    points: u32,
-    total_points: i32,
-    action_type: felt252,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct AccountRegistered {
-    #[key]
-    account: ContractAddress,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct PremiumStatusSet {
-    #[key]
-    account: ContractAddress,
-    is_premium: bool,
-    #[key]
-    admin: ContractAddress,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct DocumentStatusChanged {
-    #[key]
-    collection: felt252,
-    #[key]
-    doc_id: felt252,
-    creator: ContractAddress,
-    old_status: felt252,
-    new_status: felt252,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct StatisticsUpdated {
-    total_accounts: u64,
-    total_documents: u64,
-    total_size_bytes: u256,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct ParametersUpdated {
-    #[key]
-    admin: ContractAddress,
-    new_points_per_insert: u32,
-    new_points_per_update: u32,
-    new_points_per_delete: u32,
-    new_points_per_query_page: u32,
-    new_points_threshold_for_claim: u32,
-    new_premium_reward_multiplier: u32,
-    new_badge_threshold: u32,
-    new_points_to_strk_wei: u256,
-    timestamp: u64,
-}
-#[derive(Drop, starknet::Event)]
-struct SecurityParametersUpdated {
-    #[key]
-    admin: ContractAddress,
-    min_stake: u256,
-    stake_lock_period: u64,
-    cooldown_period: u64,
-    min_reputation: i32,
-    max_pending_time: u64,
-    approval_percentage: i32,
-    slash_percentage: i32,
-    transaction_fee_percent: i32,
-    timestamp: u64,
-}
-
-/// @title Enhanced Storage Structures
-#[derive(Drop, starknet::Store)]
-struct Document {
-    compressed_data: ByteArray,
-    creator: ContractAddress,
-    created_at: u64,
-    updated_at: u64,
-    data_hash: felt252,
-    validation_status: felt252, // "pending", "approved", "rejected", "deleted"
-    positive_votes: u32,
-    negative_votes: u32,
-    total_voters: u32,
-    whitelist_remove_votes: u32,
-    whitelist_keep_votes: u32,
-    whitelist_total_voters: u32,
-    whitelist_approved_for_deletion: bool,
-}
-
-#[derive(Drop, starknet::Store)]
-struct StakeInfo {
-    amount: u256,
-    stake_time: u64,
-    unlock_time: u64,
-    is_locked: bool,
-}
-
-#[derive(Drop, starknet::Store)]
-struct UserProfile {
-    reputation_score: i32,
-    total_documents: u32,
-    last_action_time: u64,
-    is_premium: bool,
-    warning_count: u32,
-    total_votes_cast: u32,
-    approved_documents: u32, // Count of approved documents
-}
-
-#[derive(Drop, starknet::Store)]
-struct MaliciousReport {
-    reporter: ContractAddress,
-    collection: felt252,
-    doc_id: felt252,
-    reason: felt252,
-    timestamp: u64,
-    is_resolved: bool,
-}
-
-/// @title Enhanced GurftronDB Smart Contract
-/// @notice Enterprise-grade decentralized database with comprehensive security and reward system
-/// @dev Implements all database operations with anti-abuse mechanisms, staking, and community validation
 #[starknet::contract]
 mod GurftronDB {
-    use super::{
-        IERC20Dispatcher, IERC20DispatcherTrait, IDatabase, ContractAddress, get_caller_address,
-        get_block_timestamp, get_contract_address,
-        // Event structs
-        DocumentInsertedEvent, DocumentUpdatedEvent, DocumentDeletedEvent, DocumentApprovedEvent, DocumentRejectedEvent,
-        DocumentVoteSubmitted, WhitelistVoteSubmitted, DocumentWhitelistApproved, PointsAwardedForApproval,
-        PointsAwardedForVoting, BadgeEarnedEvent, RewardClaimedEvent, UserRegisteredEvent, UserBannedEvent,
-        UserUnbannedEvent, PremiumStatusChangedEvent, StakeDepositedEvent, StakeWithdrawnEvent, StakeSlashedEvent,
-        CollectionCreatedEvent, FundsDepositedEvent, SystemPausedEvent, SystemResumedEvent, ReputationChangedEvent,
-        SecurityViolationEvent, CooldownViolation, RateLimitExceeded, PointsDeducted, MaliciousDataReported,
-        CircuitBreakerTriggered, PointsAwarded, AccountRegistered, PremiumStatusSet, DocumentStatusChanged,
-        StatisticsUpdated, ParametersUpdated, SecurityParametersUpdated,
-        // Storage structures
-        Document, StakeInfo, UserProfile, MaliciousReport
-    };
-    use core::starknet::storage::{StorageMapReadAccess, StorageMapWriteAccess};
-    use core::starknet::storage::{StorageReadAccess, StorageWriteAccess};
-    use core::starknet::storage::{StorageMapEntryReadAccess, StorageMapEntryWriteAccess};
-    use core::starknet::storage::{StorageNodeReadAccess, StorageNodeWriteAccess};
-    use core::starknet::storage::{StorageNodeEntryReadAccess, StorageNodeEntryWriteAccess};
-    use core::starknet::storage::{StorageBase, StoragePath, StoragePointer};
-    use core::starknet::storage::{StorageAccess};
-    use core::starknet::storage::{StorageEntry};
-    use core::starknet::storage::{StorageNodeAccess};
-    use core::starknet::storage::{StorageMapAccess};
-    use core::starknet::storage::{StorageNodeEntryAccess};
-    use core::num::traits::Zero;
-    use core::poseidon::PoseidonHash;
-    
-    // Define Storage Nodes for complex Map types
-    #[starknet::storage_node]
-    struct UserNode {
-        points: Map<ContractAddress, i32>,
-        badges: Map<(ContractAddress, u64), bool>,
-        is_user_premium: Map<ContractAddress, bool>,
-        banned_users: Map<ContractAddress, bool>,
-        accounts: Map<ContractAddress, u64>,
-        user_stakes: Map<ContractAddress, StakeInfo>,
-        user_profiles: Map<ContractAddress, UserProfile>,
-        user_last_actions: Map<(ContractAddress, felt252), u64>, // (user, action_type) -> timestamp
-        user_hourly_actions: Map<(ContractAddress, felt252, u64), u32>, // (user, action_type, hour) -> count
+    use starknet::{ContractAddress, get_caller_address, get_block_timestamp, get_contract_address};
+    use starknet::storage::{Map, StoragePathEntry, StoragePointerReadAccess, StoragePointerWriteAccess};
+    use core::byte_array::ByteArray;
+    use core::hash::pedersen;
+    use core::zeroable::Zeroable;
+
+    // IERC20 interface for STRK token
+    #[starknet::interface]
+    trait IERC20<TContractState> {
+        fn transfer(ref self: TContractState, recipient: ContractAddress, amount: u256) -> bool;
+        fn transfer_from(ref self: TContractState, sender: ContractAddress, recipient: ContractAddress, amount: u256) -> bool;
     }
 
-    #[starknet::storage_node]
-    struct DocumentNode {
-        next_id: Map<felt252, felt252>,
+    // Database interface
+    #[starknet::interface]
+    trait IDatabase<TContractState> {
+        fn stake_for_access(ref self: TContractState, amount: u256);
+        fn withdraw_stake(ref self: TContractState);
+        fn create_collection(ref self: TContractState, name: felt252, indexed_fields: Array<felt252>);
+        fn insert(ref self: TContractState, collection: felt252, data: ByteArray, fields: Array<(felt252, felt252)>) -> felt252;
+        fn update(ref self: TContractState, collection: felt252, id: felt252, data: ByteArray, fields: Array<(felt252, felt252)>);
+        fn delete(ref self: TContractState, collection: felt252, id: felt252);
+        fn find(self: @TContractState, collection: felt252, query: Array<(felt252, felt252, felt252)>, is_admin: bool) -> Array<felt252>;
+        fn vote_on_document(ref self: TContractState, collection: felt252, doc_id: felt252, is_valid: bool);
+        fn vote_on_whitelist(ref self: TContractState, collection: felt252, doc_id: felt252);
+        fn register_account(ref self: TContractState);
+        fn ban_user(ref self: TContractState, user: ContractAddress);
+        fn unban_user(ref self: TContractState, user: ContractAddress);
+        fn claim_reward(ref self: TContractState);
+        fn get_user_info(self: @TContractState, user: ContractAddress) -> (u256, bool, u32, bool, bool);
+        fn get_stats(self: @TContractState) -> (u64, u64, u256);
+        fn update_reward_parameters(ref self: TContractState, points_per_insert: u32, points_per_update: u32, points_per_delete: u32, points_per_vote: u32, points_to_strk: u256, premium_reward_multiplier: u256);
+    }
+
+    // Storage structures
+    #[derive(Copy, Drop, Serde, starknet::Store)]
+    struct Document {
+        data: ByteArray,
+        creator: ContractAddress,
+        created_at: u64,
+        validation_status: felt252, // pending, approved, rejected
+        whitelist_approved_for_deletion: bool,
+        positive_votes: u32,
+        negative_votes: u32,
+        whitelist_positive_votes: u32,
+        data_hash: felt252,
+    }
+
+    #[derive(Copy, Drop, Serde, starknet::Store)]
+    struct StakeInfo {
+        amount: u256,
+        stake_time: u64,
+        is_locked: bool,
+    }
+
+    #[derive(Copy, Drop, Serde, starknet::Store)]
+    struct User {
+        stake: StakeInfo,
+        points: u32,
+        total_documents: u32,
+        is_premium: bool,
+        is_banned: bool,
+        has_good_reputation: bool,
+        last_action_time: u64,
+        hourly_actions: u32,
+    }
+
+    // Storage
+    #[storage]
+    struct Storage {
+        admin: ContractAddress,
+        strk_token: ContractAddress,
+        paused: bool,
+        users: Map<ContractAddress, User>,
         documents: Map<(felt252, felt252), Document>,
-        creators: Map<(felt252, felt252), ContractAddress>,
-        document_voters: Map<(felt252, felt252, ContractAddress), bool>, // (collection, id, voter) -> has_voted for approval
-        whitelist_voters: Map<(felt252, felt252, ContractAddress), bool>, // (collection, id, voter) -> has_voted for whitelist
-    }
-
-    #[starknet::storage_node]
-    struct FieldNode {
-        field_lengths: Map<(felt252, felt252), u32>,
-        fields_data: Map<(felt252, felt252, felt252), felt252>, // (collection, id, field) -> value
-        fields_list: Map<(felt252, felt252, u32), felt252>, // (collection, id, index) -> field_name
-    }
-
-    #[starknet::storage_node]
-    struct CollectionNode {
+        next_id: Map<felt252, felt252>,
         num_docs: Map<felt252, u32>,
         doc_ids: Map<(felt252, u32), felt252>,
-        approved_docs: Map<felt252, u32>, // count of approved docs per collection
-        approved_doc_ids: Map<(felt252, u32), felt252>, // approved doc IDs per collection
-    }
-
-    #[starknet::storage_node]
-    struct IndexingNode {
-        num_indexed: Map<felt252, u32>,
+        approved_docs: Map<felt252, u32>,
+        approved_doc_ids: Map<(felt252, u32), felt252>,
+        document_voters: Map<(felt252, felt252, ContractAddress), bool>,
+        whitelist_voters: Map<(felt252, felt252, ContractAddress), bool>,
+        fields_data: Map<(felt252, felt252, felt252), felt252>,
+        fields_list: Map<(felt252, felt252, u32), felt252>,
+        field_lengths: Map<(felt252, felt252), u32>,
         indexed_fields: Map<(felt252, u32), felt252>,
-        index_num_ids: Map<(felt252, felt252, felt252), u32>, // (collection, field, value) -> count
-        index_ids: Map<(felt252, felt252, felt252, u32), felt252>, // (collection, field, value, index) -> doc_id
-    }
-
-    #[starknet::storage_node]
-    struct ValidationNode {
-        next_report_id: felt252,
-        reports: Map<felt252, MaliciousReport>,
-        pending_validations_count: u64,
-        pending_validation_ids: Map<u64, (felt252, felt252)>, // index -> (collection, doc_id)
-    }
-
-    #[starknet::storage_node]
-    struct ConfigNode {
-        admin_address: ContractAddress,
-        strk_token_address: ContractAddress,
-        is_circuit_breaker_active: bool,
-        moderators: Map<ContractAddress, bool>,
-        // Original Reward Parameters
+        num_indexed: Map<felt252, u32>,
+        index_num_ids: Map<(felt252, felt252, felt252), u32>,
+        index_ids: Map<(felt252, felt252, felt252, u32), felt252>,
+        pending_validation_ids: Map<u64, (felt252, felt252)>,
+        pending_validation_count: u64,
+        total_accounts: u64,
+        total_documents: u64,
+        total_size: u256,
         points_per_insert: u32,
         points_per_update: u32,
         points_per_delete: u32,
-        points_per_query_page: u32,
-        points_threshold_for_claim: u32,
-        premium_reward_multiplier: u32,
-        badge_threshold: u32,
-        points_to_strk_wei: u256,
-        // Security Parameters
-        minimum_stake_amount: u256,
-        stake_lock_period: u64,
+        points_per_vote: u32,
+        points_to_strk: u256,
+        premium_reward_multiplier: u256,
+        min_stake: u256,
+        approval_percentage: u32,
         action_cooldown_period: u64,
-        minimum_reputation_score: i32,
-        max_pending_time: u64,
-        approval_percentage: i32,
-        slash_percentage: i32,
-        transaction_fee_percent: i32,
-        // Original Statistics
-        total_accounts_registered: u64,
-        total_documents_inserted: u64,
-        total_database_size_bytes: u256,
-        // Security Statistics
-        total_slashed_stakes: u256,
-        total_malicious_reports: u64,
-        total_resolved_reports: u64,
+        hourly_action_limit: u32,
     }
 
-    trait ModifierTrait {
-        fn only_moderator_or_admin(self: @ContractState);
-        fn only_admin(self: @ContractState);
-        fn only_registered_non_banned(self: @ContractState);
-        fn only_staked_users(self: @ContractState);
-        fn check_reputation(self: @ContractState);
-        fn can_read(self: @ContractState);
-        fn validate_fields(self: @ContractState, fields: @Array<(felt252, felt252)>);
-        fn validate_query(self: @ContractState, query: @Array<(felt252, felt252, felt252, felt252)>);
-        fn validate_data(self: @ContractState, data: @ByteArray);
-    }
-
-    trait InternalTrait {
-        // Read-only helpers
-        fn _compute_data_hash(self: @ContractState, data: @ByteArray) -> felt252;
-        fn _calculate_data_size(self: @ContractState, data: @ByteArray) -> u256;
-        fn _get_document_fields(self: @ContractState, collection: felt252, id: felt252) -> Array<(felt252, felt252)>;
-        fn _is_indexed(self: @ContractState, collection: felt252, field: felt252, num_indexed: u32) -> bool;
-        fn _matches_condition(self: @ContractState, collection: felt252, id: felt252, field: felt252, op: felt252, value: felt252) -> bool;
-        fn _matches_query(self: @ContractState, collection: felt252, id: felt252, query: @Array<(felt252, felt252, felt252, felt252)>) -> bool;
-        fn _get_all_document_ids(self: @ContractState, collection: felt252) -> Array<felt252>;
-        fn _get_indexed_documents(self: @ContractState, collection: felt252, field: felt252, value: felt252) -> Array<felt252>;
-        fn _scan_documents(self: @ContractState, collection: felt252, query: @Array<(felt252, felt252, felt252, felt252)>) -> Array<felt252>;
-        fn _process_query(self: @ContractState, collection: felt252, query: @Array<(felt252, felt252, felt252, felt252)>) -> Array<felt252>;
-        fn _get_all_approved_document_ids(self: @ContractState, collection: felt252) -> Array<felt252>;
-        fn _process_approved_query(self: @ContractState, collection: felt252, query: @Array<(felt252, felt252, felt252, felt252)>) -> Array<felt252>;
-        fn _paginate_results(self: @ContractState, candidates: @Array<felt252>, page: u32) -> Array<felt252>;
-        // Mutating helpers (MUST use `ref self`)
-        fn _check_validation_consensus(ref self: ContractState, collection: felt252, doc_id: felt252);
-        fn _approve_document(ref self: ContractState, collection: felt252, doc_id: felt252);
-        fn _reject_document(ref self: ContractState, collection: felt252, doc_id: felt252);
-        fn _remove_from_pending_validations(ref self: ContractState, collection: felt252, doc_id: felt252);
-        fn _award_approval_points_and_badge(ref self: ContractState, creator: ContractAddress, collection: felt252, document_id: felt252);
-        fn _charge_query_points(ref self: ContractState, account: ContractAddress);
-        fn _charge_update_points(ref self: ContractState, account: ContractAddress);
-        fn _charge_delete_points(ref self: ContractState, account: ContractAddress);
-        fn _check_whitelist_consensus(ref self: ContractState, collection: felt252, doc_id: felt252);
-        fn _remove_from_all_indices(ref self: ContractState, collection: felt252, id: felt252);
-        fn _remove_from_index(ref self: ContractState, collection: felt252, field: felt252, value: felt252, id: felt252);
-        fn _cleanup_document(ref self: ContractState, collection: felt252, id: felt252);
-        fn _increment_account_statistics(ref self: ContractState);
-        fn _update_insert_statistics(ref self: ContractState, data: @ByteArray);
-        fn _update_size_statistics(ref self: ContractState, old_size: u256, new_size: u256);
-        fn _decrease_size_statistics(ref self: ContractState, size_to_remove: u256);
-        fn _store_fields(ref self: ContractState, collection: felt252, id: felt252, fields: @Array<(felt252, felt252)>);
-        fn enforce_cooldown(ref self: ContractState, action_type: felt252);
-        fn enforce_rate_limit(ref self: ContractState, action_type: felt252, max_per_hour: u32);
-    }
-
-    // ============================================================================
-    // ENHANCED CONSTANTS
-    // ============================================================================
-    /// @notice Default reward parameters - configurable by admin
-    const DEFAULT_POINTS_PER_INSERT: u32 = 10;
-    const DEFAULT_POINTS_PER_UPDATE: u32 = 1000;
-    const DEFAULT_POINTS_PER_DELETE: u32 = 1000;
-    const DEFAULT_POINTS_PER_QUERY_PAGE: u32 = 1000;
-    const DEFAULT_POINTS_THRESHOLD_FOR_CLAIM: u32 = 1000;
-    const DEFAULT_PREMIUM_REWARD_MULTIPLIER: u32 = 2;
-    const DEFAULT_BADGE_THRESHOLD: u32 = 1000;
-    const DEFAULT_POINTS_TO_STRK_WEI: u256 = 10000000000000000; // 0.01 STRK per point
-    /// @notice Security and staking constants
-    const MINIMUM_STAKE_AMOUNT: u256 = 10_000_000_000_000_000_000; // 10 STRK
-    const STAKE_LOCK_PERIOD: u64 = 2592000; // 30 days in seconds
-    const ACTION_COOLDOWN_PERIOD: u64 = 300; // 5 minutes between actions
-    const MINIMUM_REPUTATION_SCORE: i32 = -100;
-    const APPROVAL_PERCENTAGE: u32 = 60; // 60% positive votes needed for approval
-    const VOTE_REWARD_POINTS: u32 = 2; // Points for voting
-    const MAX_PENDING_TIME: u64 = 604800; // 7 days in seconds
-    /// @notice Rate limiting constants
-    const MAX_INSERTS_PER_HOUR: u32 = 10;
-    const MAX_UPDATES_PER_HOUR: u32 = 20;
-    const MAX_QUERIES_PER_HOUR: u32 = 100;
-    const MAX_VOTES_PER_HOUR: u32 = 50;
-    /// @notice Data validation constants
-    const MAXIMUM_DATA_SIZE: u32 = 1048576; // 1MB
-    const MAXIMUM_DOCUMENTS_PER_USER: u32 = 1000;
-    const MAXIMUM_FIELD_LENGTH: u32 = 100;
-    const MAX_QUERY_CONDITIONS: u32 = 50;
-    const SLASH_PERCENTAGE: u32 = 50; // 50% of stake slashed for malicious activity
-    /// @notice Query and fee constants
-    const QUERY_PAGE_SIZE: u32 = 1000;
-    const TRANSACTION_FEE_PERCENT: u32 = 10;
-    const MAX_INDEXED_FIELDS: u32 = 10;
-
-    // ============================================================================
-    // ENHANCED STORAGE
-    // ============================================================================
-    #[storage]
-    struct Storage {
-        config: ConfigNode,
-        user: UserNode,
-        document: DocumentNode,
-        field: FieldNode,
-        collection: CollectionNode,
-        indexing: IndexingNode,
-        validation: ValidationNode,
-    }
-
-    // ============================================================================
-    // EVENTS
-    // ============================================================================
+    // Events
     #[event]
     #[derive(Drop, starknet::Event)]
     enum Event {
-        // Document Lifecycle Events
-        DocumentInsertedEvent: DocumentInsertedEvent,
-        DocumentUpdatedEvent: DocumentUpdatedEvent,
-        DocumentDeletedEvent: DocumentDeletedEvent,
-        DocumentApprovedEvent: DocumentApprovedEvent,
-        DocumentRejectedEvent: DocumentRejectedEvent,
-        DocumentStatusChanged: DocumentStatusChanged,
-        // Voting Events
-        DocumentVoteSubmitted: DocumentVoteSubmitted,
+        DocumentEvent: DocumentEvent,
+        VoteSubmitted: VoteSubmitted,
         WhitelistVoteSubmitted: WhitelistVoteSubmitted,
-        DocumentWhitelistApproved: DocumentWhitelistApproved,
-        // Points and Rewards Events
-        PointsAwardedForApproval: PointsAwardedForApproval,
-        PointsAwardedForVoting: PointsAwardedForVoting,
-        BadgeEarnedEvent: BadgeEarnedEvent,
-        RewardClaimedEvent: RewardClaimedEvent,
-        PointsDeducted: PointsDeducted,
-        // User Management Events
-        UserRegisteredEvent: UserRegisteredEvent,
-        UserBannedEvent: UserBannedEvent,
-        UserUnbannedEvent: UserUnbannedEvent,
-        PremiumStatusChangedEvent: PremiumStatusChangedEvent,
-        // Staking Events
-        StakeDepositedEvent: StakeDepositedEvent,
-        StakeWithdrawnEvent: StakeWithdrawnEvent,
-        StakeSlashedEvent: StakeSlashedEvent,
-        // System Events
-        CollectionCreatedEvent: CollectionCreatedEvent,
-        FundsDepositedEvent: FundsDepositedEvent,
-        SystemPausedEvent: SystemPausedEvent,
-        SystemResumedEvent: SystemResumedEvent,
-        ReputationChangedEvent: ReputationChangedEvent,
-        SecurityViolationEvent: SecurityViolationEvent,
-        CooldownViolation: CooldownViolation,
-        RateLimitExceeded: RateLimitExceeded,
-        MaliciousDataReported: MaliciousDataReported,
-        CircuitBreakerTriggered: CircuitBreakerTriggered,
         PointsAwarded: PointsAwarded,
-        AccountRegistered: AccountRegistered,
-        PremiumStatusSet: PremiumStatusSet,
-        StatisticsUpdated: StatisticsUpdated,
+        RewardClaimed: RewardClaimed,
+        UserRegistered: UserRegistered,
+        UserBanned: UserBanned,
+        UserUnbanned: UserUnbanned,
+        CollectionCreated: CollectionCreated,
+        StakeDeposited: StakeDeposited,
+        StakeWithdrawn: StakeWithdrawn,
         ParametersUpdated: ParametersUpdated,
-        SecurityParametersUpdated: SecurityParametersUpdated,
     }
 
-    // ============================================================================
-    // CONSTRUCTOR
-    // ============================================================================
-    /// @notice Initializes the contract with admin and STRK token addresses
-    /// @param admin_addr The admin address for contract management
-    /// @param strk_token_addr The STRK token contract address
+    #[derive(Drop, starknet::Event)]
+    struct DocumentEvent {
+        caller: ContractAddress,
+        collection: felt252,
+        doc_id: felt252,
+        status: felt252, // inserted, updated, deleted, approved, rejected
+        data_hash: felt252,
+        timestamp: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct VoteSubmitted {
+        voter: ContractAddress,
+        collection: felt252,
+        doc_id: felt252,
+        is_valid: bool,
+        timestamp: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct WhitelistVoteSubmitted {
+        voter: ContractAddress,
+        collection: felt252,
+        doc_id: felt252,
+        timestamp: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct PointsAwarded {
+        user: ContractAddress,
+        points: u32,
+        reason: felt252,
+        timestamp: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct RewardClaimed {
+        user: ContractAddress,
+        amount: u256,
+        timestamp: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct UserRegistered {
+        user: ContractAddress,
+        timestamp: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct UserBanned {
+        user: ContractAddress,
+        timestamp: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct UserUnbanned {
+        user: ContractAddress,
+        timestamp: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct CollectionCreated {
+        name: felt252,
+        timestamp: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct StakeDeposited {
+        staker: ContractAddress,
+        amount: u256,
+        timestamp: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct StakeWithdrawn {
+        staker: ContractAddress,
+        amount: u256,
+        timestamp: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct ParametersUpdated {
+        timestamp: u64,
+    }
+
+    // Constants
+    const MAXIMUM_DATA_SIZE: u32 = 1048576; // 1MB
+    const MAXIMUM_INDEXED_FIELDS: u32 = 10;
+    const MAX_QUERY_CONDITIONS: u32 = 10;
+    const QUERY_PAGE_SIZE: u32 = 100;
+
+    // Constructor
     #[constructor]
-    fn constructor(ref self: ContractState, admin_addr: ContractAddress, strk_token_addr: ContractAddress) {
-        // Validate addresses
-        assert(!admin_addr.is_zero(), 'Admin address cannot be zero');
-        assert(!strk_token_addr.is_zero(), 'STRK token address cannot be zero');
-        // Set core addresses
-        self.config.admin_address.write(admin_addr);
-        self.config.strk_token_address.write(strk_token_addr);
-        self.config.is_circuit_breaker_active.write(false);
-        // Initialize original parameters
-        self.config.points_per_insert.write(DEFAULT_POINTS_PER_INSERT);
-        self.config.points_per_update.write(DEFAULT_POINTS_PER_UPDATE);
-        self.config.points_per_delete.write(DEFAULT_POINTS_PER_DELETE);
-        self.config.points_per_query_page.write(DEFAULT_POINTS_PER_QUERY_PAGE);
-        self.config.points_threshold_for_claim.write(DEFAULT_POINTS_THRESHOLD_FOR_CLAIM);
-        self.config.premium_reward_multiplier.write(DEFAULT_PREMIUM_REWARD_MULTIPLIER);
-        self.config.badge_threshold.write(DEFAULT_BADGE_THRESHOLD);
-        self.config.points_to_strk_wei.write(DEFAULT_POINTS_TO_STRK_WEI);
-        // Initialize security parameters
-        self.config.minimum_stake_amount.write(MINIMUM_STAKE_AMOUNT);
-        self.config.stake_lock_period.write(STAKE_LOCK_PERIOD);
-        self.config.action_cooldown_period.write(ACTION_COOLDOWN_PERIOD);
-        self.config.minimum_reputation_score.write(MINIMUM_REPUTATION_SCORE);
-        self.config.max_pending_time.write(MAX_PENDING_TIME);
-        self.config.approval_percentage.write(APPROVAL_PERCENTAGE.try_into().unwrap());
-        self.config.slash_percentage.write(SLASH_PERCENTAGE.try_into().unwrap());
-        self.config.transaction_fee_percent.write(TRANSACTION_FEE_PERCENT.try_into().unwrap());
-        // Initialize statistics
-        self.config.total_accounts_registered.write(0);
-        self.config.total_documents_inserted.write(0);
-        self.config.total_database_size_bytes.write(0);
-        self.config.total_slashed_stakes.write(0);
-        self.config.total_malicious_reports.write(0);
-        self.config.total_resolved_reports.write(0);
-        self.validation.next_report_id.write(1);
-        self.validation.pending_validations_count.write(0);
+    fn constructor(ref self: ContractState, admin: ContractAddress, strk_token: ContractAddress) {
+        assert(!admin.is_zero(), 'Admin address cannot be zero');
+        assert(!strk_token.is_zero(), 'STRK token address cannot be zero');
+        self.admin.write(admin);
+        self.strk_token.write(strk_token);
+        self.points_per_insert.write(10);
+        self.points_per_update.write(5);
+        self.points_per_delete.write(5);
+        self.points_per_vote.write(2);
+        self.points_to_strk.write(1_000_000_000_000_000_000); // 1 STRK per point
+        self.premium_reward_multiplier.write(2);
+        self.min_stake.write(10_000_000_000_000_000_000); // 10 STRK
+        self.approval_percentage.write(60);
+        self.action_cooldown_period.write(300); // 5 minutes
+        self.hourly_action_limit.write(50);
     }
 
-    // ============================================================================
-    // ENHANCED SECURITY MODIFIERS
-    // ============================================================================
-    impl ModifierImpl of ModifierTrait {
-        /// @notice Ensures caller is admin or moderator
-        fn only_moderator_or_admin(self: @ContractState) {
+    // Internal functions
+    #[generate_trait]
+    impl InternalImpl of InternalTrait {
+        fn _only_admin(self: @ContractState) {
             let caller = get_caller_address();
-            let admin_addr = self.config.admin_address.read();
-            assert(caller == admin_addr || self.config.moderators.entry(caller).read(), 'Not admin or moderator');
+            assert(caller == self.admin.read(), 'Not admin');
         }
-        /// @notice Ensures caller is admin
-        fn only_admin(self: @ContractState) {
-            let caller = get_caller_address();
-            let admin_addr = self.config.admin_address.read();
-            assert(caller == admin_addr, 'Caller is not admin');
+
+        fn _only_not_paused(self: @ContractState) {
+            assert(!self.paused.read(), 'Contract is paused');
         }
-        /// @notice Ensures user is registered and not banned
-        fn only_registered_non_banned(self: @ContractState) {
-            let caller = get_caller_address();
-            assert(self.user.accounts.entry(caller).read() != 0, 'Account not registered');
-            assert(!self.user.banned_users.entry(caller).read(), 'User is banned');
-            assert(!self.config.is_circuit_breaker_active.read(), 'System maintenance mode');
+
+        fn _only_registered(self: @ContractState, caller: ContractAddress) {
+            let user = self.users.entry(caller).read();
+            assert(user.last_action_time != 0, 'Account not registered');
+            assert(!user.is_banned, 'User is banned');
         }
-        /// @notice Ensures user has sufficient stake
-        fn only_staked_users(self: @ContractState) {
-            let caller = get_caller_address();
-            let stake_info = self.user.user_stakes.entry(caller).read();
-            let min_stake = self.config.minimum_stake_amount.read();
-            assert(stake_info.amount >= min_stake, 'Insufficient stake amount');
-            assert(!stake_info.is_locked, 'Stake is locked');
+
+        fn _enforce_security(self: @ContractState, caller: ContractAddress, action_type: felt252) {
+            let mut user = self.users.entry(caller).read();
+            assert(user.stake.amount >= self.min_stake.read(), 'Insufficient stake');
+            assert(user.has_good_reputation, 'Bad reputation');
+            let current_time = get_block_timestamp();
+            assert(current_time >= user.last_action_time + self.action_cooldown_period.read(), 'Cooldown violation');
+            let current_hour = current_time / 3600;
+            let actions = user.hourly_actions;
+            assert(actions < self.hourly_action_limit.read(), 'Hourly action limit exceeded');
+            user.last_action_time = current_time;
+            user.hourly_actions = actions + 1;
+            self.users.entry(caller).write(user);
         }
-        /// @notice Ensures user has sufficient reputation
-        fn check_reputation(self: @ContractState) {
-            let caller = get_caller_address();
-            let profile = self.user.user_profiles.entry(caller).read();
-            let min_rep = self.config.minimum_reputation_score.read();
-            assert(profile.reputation_score >= min_rep, 'Reputation too low');
+
+        fn _compute_data_hash(self: @ContractState, data: @ByteArray) -> felt252 {
+            let mut hasher = 0;
+            let len = data.len();
+            hasher = pedersen(hasher, len.into());
+            let mut i = 0;
+            while i < len {
+                hasher = pedersen(hasher, (*data.at(i)).into());
+                i += 1;
+            };
+            hasher
         }
-        /// @notice Ensures user can perform read operations
-        fn can_read(self: @ContractState) {
-            let caller = get_caller_address();
-            let is_premium = self.user.is_user_premium.entry(caller).read();
-            let points = self.user.points.entry(caller).read();
-            assert(!self.user.banned_users.entry(caller).read(), 'User is banned');
-            assert(is_premium || points >= 0, 'Negative balance - upgrade to premium');
+
+        fn _check_validation_consensus(ref self: ContractState, collection: felt252, doc_id: felt252) {
+            let doc = self.documents.entry((collection, doc_id)).read();
+            let total_votes = doc.positive_votes + doc.negative_votes;
+            let total_accounts = self.total_accounts.read();
+            let required_votes = (total_accounts * self.approval_percentage.read().into()) / 100;
+            if total_votes >= required_votes {
+                if doc.positive_votes > doc.negative_votes {
+                    let mut doc = doc;
+                    doc.validation_status = 'approved';
+                    self.documents.entry((collection, doc_id)).write(doc);
+                    let approved_count = self.approved_docs.entry(collection).read();
+                    self.approved_doc_ids.entry((collection, approved_count)).write(doc_id);
+                    self.approved_docs.entry(collection).write(approved_count + 1);
+                    let creator = doc.creator;
+                    let mut creator_user = self.users.entry(creator).read();
+                    creator_user.points += self.points_per_insert.read();
+                    self.users.entry(creator).write(creator_user);
+                    self.emit(DocumentEvent {
+                        caller: creator,
+                        collection,
+                        doc_id,
+                        status: 'approved',
+                        data_hash: doc.data_hash,
+                        timestamp: get_block_timestamp(),
+                    });
+                } else {
+                    let mut doc = doc;
+                    doc.validation_status = 'rejected';
+                    self.documents.entry((collection, doc_id)).write(doc);
+                    let creator = doc.creator;
+                    let mut creator_user = self.users.entry(creator).read();
+                    creator_user.has_good_reputation = false;
+                    self.users.entry(creator).write(creator_user);
+                    self.emit(DocumentEvent {
+                        caller: creator,
+                        collection,
+                        doc_id,
+                        status: 'rejected',
+                        data_hash: doc.data_hash,
+                        timestamp: get_block_timestamp(),
+                    });
+                }
+            }
         }
-        /// @notice Validates field array length
-        fn validate_fields(self: @ContractState, fields: @Array<(felt252, felt252)>) {
-            assert(fields.len() <= MAXIMUM_FIELD_LENGTH, 'Too many fields');
+
+        fn _process_fields(ref self: ContractState, collection: felt252, id: felt252, fields: @Array<(felt252, felt252)>) {
+            let len = fields.len();
+            self.field_lengths.entry((collection, id)).write(len);
+            let num_indexed = self.num_indexed.entry(collection).read();
+            let mut i = 0;
+            while i < len {
+                let (field, value) = *fields.at(i);
+                self.fields_list.entry((collection, id, i)).write(field);
+                self.fields_data.entry((collection, id, field)).write(value);
+                let mut j = 0;
+                let mut is_indexed = false;
+                while j < num_indexed {
+                    if self.indexed_fields.entry((collection, j)).read() == field {
+                        is_indexed = true;
+                        break;
+                    }
+                    j += 1;
+                };
+                if is_indexed {
+                    let num = self.index_num_ids.entry((collection, field, value)).read();
+                    self.index_ids.entry((collection, field, value, num)).write(id);
+                    self.index_num_ids.entry((collection, field, value)).write(num + 1);
+                }
+                i += 1;
+            };
         }
-        /// @notice Validates query conditions length
-        fn validate_query(self: @ContractState, query: @Array<(felt252, felt252, felt252, felt252)>) {
-            assert(query.len() <= MAX_QUERY_CONDITIONS, 'Too many query conditions');
+
+        fn _matches_condition(self: @ContractState, collection: felt252, id: felt252, field: felt252, operator: felt252, value: felt252) -> bool {
+            let actual = self.fields_data.entry((collection, id, field)).read();
+            if operator == 'eq' {
+                actual == value
+            } else if operator == 'gt' {
+                actual > value
+            } else if operator == 'lt' {
+                actual < value
+            } else {
+                false
+            }
         }
-        /// @notice Validates data integrity and size
-        fn validate_data(self: @ContractState, data: @ByteArray) {
-            assert(data.len() > 0, 'Data cannot be empty');
-            assert(data.len() <= MAXIMUM_DATA_SIZE, 'Data size exceeds limit');
+
+        fn _decrease_size_statistics(ref self: ContractState, size_to_remove: u256) {
+            self.total_size.write(self.total_size.read() - size_to_remove);
         }
     }
 
-    // ============================================================================
-    // STAKING SYSTEM
-    // ============================================================================
-    /// @notice Deposits STRK tokens to fund rewards (Admin only)
-    /// @param amount Amount of STRK to deposit
-    #[external(v0)]
-    fn deposit_funds(ref self: ContractState, amount: u256) {
-        self.only_admin();
-        assert(amount > 0, 'Amount must be greater than 0');
-        let caller = get_caller_address();
-        let strk_token = IERC20Dispatcher { contract_address: self.config.strk_token_address.read() };
-        let contract_addr = get_contract_address();
-        let success = strk_token.transfer_from(caller, contract_addr, amount);
-        assert(success, 'Transfer failed');
-        self.emit(FundsDepositedEvent { admin: caller, amount, timestamp: get_block_timestamp() });
-    }
-    /// @notice Sets premium status for a user (Admin only)
-    /// @param user_address Address of the user
-    /// @param is_premium Premium status to set
-    #[external(v0)]
-    fn set_user_premium_status(ref self: ContractState, user_address: ContractAddress, is_premium: bool) {
-        self.only_admin();
-        assert(!user_address.is_zero(), 'Invalid user address');
-        let caller = get_caller_address();
-        self.user.is_user_premium.entry(user_address).write(is_premium);
-        self.emit(PremiumStatusSet { account: user_address, is_premium, admin: caller, timestamp: get_block_timestamp() });
-    }
-    /// @notice Emergency circuit breaker to pause system (Admin only)
-    #[external(v0)]
-    fn trigger_circuit_breaker(ref self: ContractState, reason: felt252) {
-        self.only_admin();
-        let caller = get_caller_address();
-        self.config.is_circuit_breaker_active.write(true);
-        self.emit(CircuitBreakerTriggered { admin: caller, reason, timestamp: get_block_timestamp() });
-    }
-    /// @notice Deactivate circuit breaker (Admin only)
-    #[external(v0)]
-    fn deactivate_circuit_breaker(ref self: ContractState) {
-        self.only_admin();
-        self.config.is_circuit_breaker_active.write(false);
-    }
-
-    // ============================================================================
-    // DATABASE IMPLEMENTATION WITH ENHANCED SECURITY
-    // ============================================================================
+    // External functions
     #[abi(embed_v0)]
     impl DatabaseImpl of IDatabase<ContractState> {
-        // Add functions to manage moderators
-        /// @notice Adds a moderator (Admin only)
-        /// @param moderator Address to grant moderator role
-        fn add_moderator(ref self: ContractState, moderator: ContractAddress) {
-            self.only_admin();
-            assert(!moderator.is_zero(), 'Invalid moderator address');
-            self.config.moderators.entry(moderator).write(true);
-        }
-        /// @notice Removes a moderator (Admin only)
-        /// @param moderator Address to remove moderator role
-        fn remove_moderator(ref self: ContractState, moderator: ContractAddress) {
-            self.only_admin();
-            assert(!moderator.is_zero(), 'Invalid moderator address');
-            self.config.moderators.entry(moderator).write(false);
-        }
-        /// @notice Stakes STRK tokens for database access
-        /// @param amount Amount of STRK to stake (minimum 10 STRK)
         fn stake_for_access(ref self: ContractState, amount: u256) {
+            self._only_not_paused();
             let caller = get_caller_address();
-            let min_stake = self.config.minimum_stake_amount.read();
-            assert(amount >= min_stake, 'Stake amount too low');
-            // Transfer STRK tokens to contract
-            let strk_token = IERC20Dispatcher { contract_address: self.config.strk_token_address.read() };
-            let contract_addr = get_contract_address();
-            let success = strk_token.transfer_from(caller, contract_addr, amount);
-            assert(success, 'Stake transfer failed');
-            let current_time = get_block_timestamp();
-            let lock_period = self.config.stake_lock_period.read();
-            // Update or create stake info
-            let existing_stake = self.user.user_stakes.entry(caller).read();
-            let total_stake = existing_stake.amount + amount;
-            let stake_info = StakeInfo {
-                amount: total_stake,
-                stake_time: current_time,
-                unlock_time: current_time + lock_period,
-                is_locked: false,
-            };
-            self.user.user_stakes.entry(caller).write(stake_info);
-            self.emit(StakeDepositedEvent { 
-                staker: caller, 
-                amount: total_stake, 
-                unlock_time: current_time + lock_period,
-                timestamp: current_time
-            });
+            self._only_registered(caller);
+            assert(amount >= self.min_stake.read(), 'Stake too low');
+            let strk = IERC20Dispatcher { contract_address: self.strk_token.read() };
+            strk.transfer_from(caller, get_contract_address(), amount);
+            let mut user = self.users.entry(caller).read();
+            user.stake.amount += amount;
+            user.stake.stake_time = get_block_timestamp();
+            self.users.entry(caller).write(user);
+            self.emit(StakeDeposited { staker: caller, amount, timestamp: get_block_timestamp() });
         }
-        /// @notice Withdraws staked STRK tokens after lock period
+
         fn withdraw_stake(ref self: ContractState) {
+            self._only_not_paused();
             let caller = get_caller_address();
-            let stake_info = self.user.user_stakes.entry(caller).read();
-            let current_time = get_block_timestamp();
-            assert(stake_info.amount > 0, 'No stake to withdraw');
-            assert(current_time >= stake_info.unlock_time, 'Stake still locked');
-            assert(!stake_info.is_locked, 'Stake locked due to disputes');
-            let amount = stake_info.amount;
-            // Clear stake info
-            self.user.user_stakes.entry(caller).write(StakeInfo {
-                amount: 0,
-                stake_time: 0,
-                unlock_time: 0,
-                is_locked: false,
-            });
-            // Transfer STRK back to user
-            let strk_token = IERC20Dispatcher { contract_address: self.config.strk_token_address.read() };
-            let success = strk_token.transfer(caller, amount);
-            assert(success, 'Withdraw transfer failed');
-            self.emit(StakeWithdrawnEvent { 
-                staker: caller, 
-                amount, 
-                timestamp: current_time 
-            });
+            self._only_registered(caller);
+            let mut user = self.users.entry(caller).read();
+            assert(!user.stake.is_locked, 'Stake is locked');
+            assert(get_block_timestamp() >= user.stake.stake_time + 86400, 'Stake locked for 24 hours');
+            let amount = user.stake.amount;
+            assert(amount > 0, 'No stake to withdraw');
+            user.stake.amount = 0;
+            self.users.entry(caller).write(user);
+            let strk = IERC20Dispatcher { contract_address: self.strk_token.read() };
+            strk.transfer(caller, amount);
+            self.emit(StakeWithdrawn { staker: caller, amount, timestamp: get_block_timestamp() });
         }
-        /// @notice Gets stake information for a user
-        /// @param user Address to check
-        /// @return (amount, unlock_time, is_locked) Stake details
-        fn get_stake_info(self: @ContractState, user: ContractAddress) -> (u256, u64, bool) {
-            let stake_info = self.user.user_stakes.entry(user).read();
-            (stake_info.amount, stake_info.unlock_time, stake_info.is_locked)
-        }
-        /// @notice Emergency unlock stake for a user (Admin only)
-        /// @param user User to unlock stake for
-        fn emergency_unlock_stake(ref self: ContractState, user: ContractAddress) {
-            self.only_admin();
-            let mut stake_info = self.user.user_stakes.entry(user).read();
-            let updated_stake = StakeInfo {
-                amount: stake_info.amount,
-                stake_time: stake_info.stake_time, 
-                unlock_time: stake_info.unlock_time,
-                is_locked: false,
-            };
-            self.user.user_stakes.entry(user).write(updated_stake);
-        }
-        /// @notice Creates a new collection with specified indexed fields
-        /// @param name Collection name
-        /// @param indexed_fields Array of field names to index for efficient querying
+
         fn create_collection(ref self: ContractState, name: felt252, indexed_fields: Array<felt252>) {
-            self.only_registered_non_banned();
-            self.only_staked_users();
-            self.check_reputation();
-            self.enforce_cooldown('create_collection');
-            assert(name != 0, 'Collection name cannot be empty');
-            assert(indexed_fields.len() <= MAX_INDEXED_FIELDS, 'Too many indexed fields');
-            let caller = get_caller_address();
-            let len: u32 = indexed_fields.len();
-            // Store indexed fields
-            self.indexing.num_indexed.entry(name).write(len);
-            let mut i: u32 = 0;
+            self._only_admin();
+            self._only_not_paused();
+            let len = indexed_fields.len();
+            assert(len <= MAXIMUM_INDEXED_FIELDS, 'Too many indexed fields');
+            self.num_indexed.entry(name).write(len);
+            let mut i = 0;
             while i < len {
-                let field = *indexed_fields.at(i);
-                assert(field != 0, 'Field name cannot be empty');
-                self.indexing.indexed_fields.entry((name, i)).write(field);
+                self.indexed_fields.entry((name, i)).write(*indexed_fields.at(i));
                 i += 1;
-            }
-            self.emit(CollectionCreatedEvent { 
-                creator: caller, 
-                collection_name: name, 
-                indexed_fields_count: len,
-                timestamp: get_block_timestamp()
-            });
+            };
+            self.emit(CollectionCreated { name, timestamp: get_block_timestamp() });
         }
-        /// @notice Inserts a document into a collection with validation
-        /// @param collection Collection name
-        /// @param compressed_data Document data (compressed by client)
-        /// @param fields Metadata fields as key-value pairs
-        /// @return felt252 Document ID
-        fn insert(
-            ref self: ContractState, 
-            collection: felt252, 
-            compressed_data: ByteArray, 
-            fields: Array<(felt252, felt252)>
-        ) -> felt252 {
-            self.only_registered_non_banned();
-            self.only_staked_users();
-            self.check_reputation();
-            self.enforce_cooldown('insert');
-            self.enforce_rate_limit('insert', MAX_INSERTS_PER_HOUR);
-            self.validate_fields(@fields);
-            self.validate_data(@compressed_data);
-            assert(collection != 0, 'Collection name cannot be empty');
+
+        fn insert(ref self: ContractState, collection: felt252, data: ByteArray, fields: Array<(felt252, felt252)>) -> felt252 {
+            self._only_not_paused();
             let caller = get_caller_address();
-            let timestamp = get_block_timestamp();
-            // Check user document limit (premium users have no limit)
-            let profile = self.user.user_profiles.entry(caller).read();
-            if !self.user.is_user_premium.entry(caller).read() {
-                assert(profile.total_documents < MAXIMUM_DOCUMENTS_PER_USER, 'Document limit reached');
-            }
-            // Generate document ID and update collection
-            let id = self.document.next_id.entry(collection).read();
-            self.document.next_id.entry(collection).write(id + 1);
-            let index = self.collection.num_docs.entry(collection).read();
-            self.collection.doc_ids.entry((collection, index)).write(id);
-            self.collection.num_docs.entry(collection).write(index + 1);
-            // Compute data hash for integrity
-            let data_hash = self._compute_data_hash(@compressed_data);
-            // Store document with pending status and enhanced fields
-            self.document.creators.entry((collection, id)).write(caller);
+            self._only_registered(caller);
+            self._enforce_security(caller, 'insert');
+            assert(data.len() <= MAXIMUM_DATA_SIZE, 'Data too large');
+            let id = self.next_id.entry(collection).read();
+            self.next_id.entry(collection).write(id + 1);
+            let index = self.num_docs.entry(collection).read();
+            self.doc_ids.entry((collection, index)).write(id);
+            self.num_docs.entry(collection).write(index + 1);
+            let data_hash = self._compute_data_hash(@data);
             let doc = Document {
-                compressed_data: compressed_data.clone(),
+                data,
                 creator: caller,
-                created_at: timestamp,
-                updated_at: timestamp,
-                data_hash: data_hash,
+                created_at: get_block_timestamp(),
                 validation_status: 'pending',
+                whitelist_approved_for_deletion: false,
                 positive_votes: 0,
                 negative_votes: 0,
-                total_voters: 0,
-                whitelist_remove_votes: 0,
-                whitelist_keep_votes: 0,
-                whitelist_total_voters: 0,
-                whitelist_approved_for_deletion: false,
-            };
-            self.document.documents.entry((collection, id)).write(doc);
-            // Store fields and update indices
-            self._store_fields(collection, id, @fields);
-            // Add to pending validations
-            let pending_count = self.validation.pending_validations_count.read();
-            self.validation.pending_validation_ids.entry(pending_count).write((collection, id));
-            self.validation.pending_validations_count.write(pending_count + 1);
-            // Update user profile
-            let mut updated_profile = profile;
-            updated_profile.total_documents += 1;
-            updated_profile.reputation_score += 1;
-            self.user.user_profiles.entry(caller).write(updated_profile);
-            // Update statistics
-            self._update_insert_statistics(@compressed_data);
-            self.emit(DocumentInsertedEvent { 
-                caller, 
-                collection, 
-                document_id: id, 
+                whitelist_positive_votes: 0,
                 data_hash,
-                timestamp
+            };
+            self.documents.entry((collection, id)).write(doc);
+            self.pending_validation_ids.entry(self.pending_validation_count.read()).write((collection, id));
+            self.pending_validation_count.write(self.pending_validation_count.read() + 1);
+            self._process_fields(collection, id, @fields);
+            let mut user = self.users.entry(caller).read();
+            user.points += self.points_per_insert.read();
+            user.total_documents += 1;
+            self.users.entry(caller).write(user);
+            self.total_documents.write(self.total_documents.read() + 1);
+            self.total_size.write(self.total_size.read() + data.len().into());
+            self.emit(DocumentEvent {
+                caller,
+                collection,
+                doc_id: id,
+                status: 'inserted',
+                data_hash,
+                timestamp: get_block_timestamp(),
             });
             id
         }
-        /// @notice Retrieves a document by ID (only approved documents for regular users)
-        /// @param collection Collection name
-        /// @param id Document ID
-        /// @return (ByteArray, Array<(felt252, felt252)>) Document data and fields
-        fn get(self: @ContractState, collection: felt252, id: felt252) -> (ByteArray, Array<(felt252, felt252)>) {
-            self.can_read();
-            let doc = self.document.documents.entry((collection, id)).read();
-            assert(!doc.creator.is_zero(), 'Document not found');
-            // Only allow approved documents for non-admin users
+
+        fn update(ref self: ContractState, collection: felt252, id: felt252, data: ByteArray, fields: Array<(felt252, felt252)>) {
+            self._only_not_paused();
             let caller = get_caller_address();
-            if caller != self.config.admin_address.read() {
-                assert(doc.validation_status == 'approved', 'Document not approved');
-            }
-            let fields = self._get_document_fields(collection, id);
-            (doc.compressed_data, fields)
-        }
-        /// @notice Updates an existing document
-        /// @param collection Collection name
-        /// @param id Document ID
-        /// @param compressed_data New document data
-        /// @param fields New metadata fields
-        fn update(
-            ref self: ContractState, 
-            collection: felt252, 
-            id: felt252, 
-            compressed_data: ByteArray, 
-            fields: Array<(felt252, felt252)>
-        ) {
-            self.only_registered_non_banned();
-            self.only_staked_users();
-            self.check_reputation();
-            self.enforce_cooldown('update');
-            self.enforce_rate_limit('update', MAX_UPDATES_PER_HOUR);
-            self.validate_fields(@fields);
-            self.validate_data(@compressed_data);
-            let caller = get_caller_address();
-            let creator = self.document.creators.entry((collection, id)).read();
-            assert(!creator.is_zero(), 'Document not found');
-            assert(caller == creator, 'Only creator can update');
-            // Deduct points if not premium
-            self._charge_update_points(caller);
-            // Calculate size difference for statistics
-            let old_doc = self.document.documents.entry((collection, id)).read();
-            let old_size = self._calculate_data_size(@old_doc.compressed_data);
-            let new_size = self._calculate_data_size(@compressed_data);
-            // Update document and reset validation status
-            let timestamp = get_block_timestamp();
-            let data_hash = self._compute_data_hash(@compressed_data);
-            let updated_doc = Document {
-                compressed_data: compressed_data,
+            self._only_registered(caller);
+            self._enforce_security(caller, 'update');
+            let old_doc = self.documents.entry((collection, id)).read();
+            assert(old_doc.creator == caller || caller == self.admin.read(), 'Not authorized');
+            assert(data.len() <= MAXIMUM_DATA_SIZE, 'Data too large');
+            let data_hash = self._compute_data_hash(@data);
+            let mut doc = Document {
+                data,
                 creator: old_doc.creator,
                 created_at: old_doc.created_at,
-                updated_at: timestamp,
-                data_hash: data_hash,
                 validation_status: 'pending',
+                whitelist_approved_for_deletion: false,
                 positive_votes: 0,
                 negative_votes: 0,
-                total_voters: 0,
-                whitelist_remove_votes: old_doc.whitelist_remove_votes,
-                whitelist_keep_votes: old_doc.whitelist_keep_votes,
-                whitelist_total_voters: old_doc.whitelist_total_voters,
-                whitelist_approved_for_deletion: old_doc.whitelist_approved_for_deletion,
+                whitelist_positive_votes: 0,
+                data_hash,
             };
-            self.document.documents.entry((collection, id)).write(updated_doc);
-            // Update fields and indices
-            self._remove_from_all_indices(collection, id);
-            self._store_fields(collection, id, @fields);
-            // Add back to pending validations
-            let pending_count = self.validation.pending_validations_count.read();
-            self.validation.pending_validation_ids.entry(pending_count).write((collection, id));
-            self.validation.pending_validations_count.write(pending_count + 1);
-            // Update database size statistics
-            self._update_size_statistics(old_size, new_size);
-            self.emit(DocumentUpdatedEvent { 
-                caller, 
-                collection, 
-                document_id: id, 
-                old_data_hash: old_doc.data_hash,
-                new_data_hash: data_hash,
-                timestamp
+            self.documents.entry((collection, id)).write(doc);
+            self._process_fields(collection, id, @fields);
+            self.pending_validation_ids.entry(self.pending_validation_count.read()).write((collection, id));
+            self.pending_validation_count.write(self.pending_validation_count.read() + 1);
+            let mut user = self.users.entry(caller).read();
+            user.points += self.points_per_update.read();
+            self.users.entry(caller).write(user);
+            self._decrease_size_statistics(old_doc.data.len().into());
+            self.total_size.write(self.total_size.read() + data.len().into());
+            self.emit(DocumentEvent {
+                caller,
+                collection,
+                doc_id: id,
+                status: 'updated',
+                data_hash,
+                timestamp: get_block_timestamp(),
             });
         }
-        /// @notice Deletes a document
-        /// @param collection Collection name
-        /// @param id Document ID
+
         fn delete(ref self: ContractState, collection: felt252, id: felt252) {
-            self.only_registered_non_banned();
-            self.only_staked_users();
-            self.check_reputation();
-            self.enforce_cooldown('delete');
+            self._only_not_paused();
             let caller = get_caller_address();
-            let creator = self.document.creators.entry((collection, id)).read();
-            assert(!creator.is_zero(), 'Document not found');
-            assert(caller == creator, 'Only creator can delete');
-            // Deduct points if not premium
-            self._charge_delete_points(caller);
-            // Calculate size for statistics update
-            let doc = self.document.documents.entry((collection, id)).read();
-            let doc_size = self._calculate_data_size(@doc.compressed_data);
-            // Remove from indices and clean up
-            self._remove_from_all_indices(collection, id);
-            self._cleanup_document(collection, id);
-            // Update user profile
-            let mut profile = self.user.user_profiles.entry(caller).read();
-            if profile.total_documents > 0 {
-                profile.total_documents -= 1;
-            }
-            if doc.validation_status == 'approved' && profile.approved_documents > 0 {
-                profile.approved_documents -= 1;
-            }
-            self.user.user_profiles.entry(caller).write(profile);
-            // Update statistics (reduce total size)
-            self._decrease_size_statistics(doc_size);
-            self.emit(DocumentDeletedEvent { 
-                caller, 
-                collection, 
-                document_id: id,
+            self._only_registered(caller);
+            self._enforce_security(caller, 'delete');
+            let doc = self.documents.entry((collection, id)).read();
+            assert(doc.creator == caller || caller == self.admin.read() || doc.whitelist_approved_for_deletion, 'Not authorized');
+            let num_docs = self.num_docs.entry(collection).read();
+            let mut i = 0;
+            while i < num_docs {
+                if self.doc_ids.entry((collection, i)).read() == id {
+                    let last_id = self.doc_ids.entry((collection, num_docs - 1)).read();
+                    self.doc_ids.entry((collection, i)).write(last_id);
+                    self.num_docs.entry(collection).write(num_docs - 1);
+                    break;
+                }
+                i += 1;
+            };
+            let num_approved = self.approved_docs.entry(collection).read();
+            let mut j = 0;
+            while j < num_approved {
+                if self.approved_doc_ids.entry((collection, j)).read() == id {
+                    let last_id = self.approved_doc_ids.entry((collection, num_approved - 1)).read();
+                    self.approved_doc_ids.entry((collection, j)).write(last_id);
+                    self.approved_docs.entry(collection).write(num_approved - 1);
+                    break;
+                }
+                j += 1;
+            };
+            self.documents.entry((collection, id)).write(Document {
+                data: ByteArray::default(),
+                creator: Zeroable::zero(),
+                created_at: 0,
+                validation_status: 'rejected',
+                whitelist_approved_for_deletion: false,
+                positive_votes: 0,
+                negative_votes: 0,
+                whitelist_positive_votes: 0,
+                data_hash: 0,
+            });
+            self._decrease_size_statistics(doc.data.len().into());
+            self.total_documents.write(self.total_documents.read() - 1);
+            let mut user = self.users.entry(caller).read();
+            user.points += self.points_per_delete.read();
+            self.users.entry(caller).write(user);
+            self.emit(DocumentEvent {
+                caller,
+                collection,
+                doc_id: id,
+                status: 'deleted',
                 data_hash: doc.data_hash,
-                creator: doc.creator,
-                timestamp: get_block_timestamp()
+                timestamp: get_block_timestamp(),
             });
         }
-        /// @notice Finds documents matching query conditions (approved only for regular users)
-        /// @param collection Collection name
-        /// @param query Query conditions array
-        /// @param page Page number (1-based)
-        /// @return Array<felt252> Array of matching document IDs
-        fn find(
-            self: @ContractState, 
-            collection: felt252, 
-            query: Array<(felt252, felt252, felt252, felt252)>, 
-            page: u32
-        ) -> Array<felt252> {
-            self.can_read();
-            self.validate_query(@query);
-            assert(page > 0, 'Page must be >= 1');
+
+        fn find(self: @ContractState, collection: felt252, query: Array<(felt252, felt252, felt252)>, is_admin: bool) -> Array<felt252> {
+            self._only_not_paused();
             let caller = get_caller_address();
-            // Charge for pagination beyond first page
-            if page > 1 && !self.user.is_user_premium.entry(caller).read() {
-                self._charge_query_points(caller);
+            self._only_registered(caller);
+            if is_admin {
+                self._only_admin();
             }
-            // Process query and return paginated results (approved documents only)
-            let candidates = self._process_approved_query(collection, @query);
-            self._paginate_results(@candidates, page)
-        }
-        /// @notice Finds first document matching query conditions
-        /// @param collection Collection name
-        /// @param query Query conditions array
-        /// @return (ByteArray, Array<(felt252, felt252)>) First matching document
-        fn find_one(
-            self: @ContractState, 
-            collection: felt252, 
-            query: Array<(felt252, felt252, felt252, felt252)>
-        ) -> (ByteArray, Array<(felt252, felt252)>) {
-            let ids = self.find(collection, query, 1);
-            if ids.len() == 0 {
-                return (Default::default(), ArrayTrait::new());
-            }
-            let id = *ids.at(0);
-            self.get(collection, id)
-        }
-        /// @notice Gets all approved document IDs in a collection
-        /// @param collection Collection name
-        /// @return Array<felt252> All approved document IDs
-        fn get_all_data(self: @ContractState, collection: felt252) -> Array<felt252> {
-            self.can_read();
-            let mut result = ArrayTrait::new();
-            let num_approved = self.collection.approved_docs.entry(collection).read();
-            let mut i: u32 = 0;
-            while i < num_approved {
-                let id = self.collection.approved_doc_ids.entry((collection, i)).read();
-                result.append(id);
-                i += 1;
-            }
-            result
-        }
-        /// @notice Admin-only function to find all documents (including pending)
-        /// @param collection Collection name
-        /// @param query Query conditions array
-        /// @param page Page number
-        /// @return Array<felt252> All matching document IDs
-        fn admin_find(
-            self: @ContractState, 
-            collection: felt252, 
-            query: Array<(felt252, felt252, felt252, felt252)>, 
-            page: u32
-        ) -> Array<felt252> {
-            self.only_admin();
-            self.validate_query(@query);
-            assert(page > 0, 'Page must be >= 1');
-            let candidates = self._process_query(collection, @query);
-            self._paginate_results(@candidates, page)
-        }
-        /// @notice Admin-only function to get all document IDs (including pending)
-        /// @param collection Collection name
-        /// @return Array<felt252> All document IDs
-        fn admin_get_all_data(self: @ContractState, collection: felt252) -> Array<felt252> {
-            self.only_admin();
-            let mut result = ArrayTrait::new();
-            let num_docs = self.collection.num_docs.entry(collection).read();
-            let mut i: u32 = 0;
+            let mut result = array![];
+            let num_docs = self.num_docs.entry(collection).read();
+            let mut i = 0;
             while i < num_docs {
-                let id = self.collection.doc_ids.entry((collection, i)).read();
-                result.append(id);
+                let id = self.doc_ids.entry((collection, i)).read();
+                let doc = self.documents.entry((collection, id)).read();
+                if !is_admin && doc.validation_status != 'approved' {
+                    i += 1;
+                    continue;
+                }
+                let mut matches = true;
+                let mut j = 0;
+                while j < query.len() {
+                    let (field, operator, value) = *query.at(j);
+                    if !self._matches_condition(collection, id, field, operator, value) {
+                        matches = false;
+                        break;
+                    }
+                    j += 1;
+                };
+                if matches {
+                    result.append(id);
+                }
                 i += 1;
-            }
+            };
             result
         }
-        /// @notice Vote on a document's validity
-        /// @param collection Collection name
-        /// @param doc_id Document ID
-        /// @param is_valid Whether the document is valid/legitimate
+
         fn vote_on_document(ref self: ContractState, collection: felt252, doc_id: felt252, is_valid: bool) {
-            self.only_registered_non_banned();
-            self.only_staked_users();
-            self.check_reputation();
-            self.enforce_rate_limit('vote', MAX_VOTES_PER_HOUR);
+            self._only_not_paused();
             let caller = get_caller_address();
-            assert(!caller.is_zero(), 'Zero address cannot vote');
-            let mut doc = self.document.documents.entry((collection, doc_id)).read();
-            assert(!doc.creator.is_zero(), 'Document not found');
-            assert(doc.validation_status == 'pending', 'Document not pending validation');
-            assert(doc.creator != caller, 'Cannot vote on own document');
-            assert(!self.document.document_voters.entry((collection, doc_id, caller)).read(), 'Already voted on this document');
-            // Record the vote
-            self.document.document_voters.entry((collection, doc_id, caller)).write(true);
+            self._only_registered(caller);
+            self._enforce_security(caller, 'vote');
+            let mut doc = self.documents.entry((collection, doc_id)).read();
+            assert(doc.validation_status == 'pending', 'Document not pending');
+            assert(!self.document_voters.entry((collection, doc_id, caller)).read(), 'Already voted');
+            self.document_voters.entry((collection, doc_id, caller)).write(true);
             if is_valid {
                 doc.positive_votes += 1;
             } else {
                 doc.negative_votes += 1;
             }
-            doc.total_voters += 1;
-            self.document.documents.entry((collection, doc_id)).write(doc);
-            // Award points for voting
-            let current_points = self.user.points.entry(caller).read();
-            let new_points = current_points + VOTE_REWARD_POINTS.try_into().unwrap();
-            self.user.points.entry(caller).write(new_points);
-            // Update voter profile
-            let mut profile = self.user.user_profiles.entry(caller).read();
-            profile.total_votes_cast += 1;
-            self.user.user_profiles.entry(caller).write(profile);
-            self.emit(PointsAwardedForVoting {
+            self.documents.entry((collection, doc_id)).write(doc);
+            let mut user = self.users.entry(caller).read();
+            user.points += self.points_per_vote.read();
+            self.users.entry(caller).write(user);
+            self.emit(VoteSubmitted {
                 voter: caller,
                 collection,
-                document_id: doc_id,
-                points_awarded: VOTE_REWARD_POINTS,
-                total_points: new_points,
-                vote_type: 'approval',
-                timestamp: get_block_timestamp()
-            });
-            self.emit(DocumentVoteSubmitted { 
-                voter: caller, 
-                collection, 
-                document_id: doc_id,
-                creator: doc.creator,
+                doc_id,
                 is_valid,
-                positive_votes: doc.positive_votes,
-                negative_votes: doc.negative_votes,
-                timestamp: get_block_timestamp()
+                timestamp: get_block_timestamp(),
             });
-            // Check if validation threshold reached
             self._check_validation_consensus(collection, doc_id);
         }
-        /// @notice Vote to whitelist a document for deletion
-        /// @param collection Collection name
-        /// @param doc_id Document ID
-        /// @param vote_remove Whether to vote for removal (true) or to keep (false)
-        fn vote_on_whitelist(ref self: ContractState, collection: felt252, doc_id: felt252, vote_remove: bool) {
-            self.only_registered_non_banned();
-            self.only_staked_users();
-            self.check_reputation();
-            self.enforce_rate_limit('whitelist_vote', MAX_VOTES_PER_HOUR);
-            let voter = get_caller_address();
-            assert(!voter.is_zero(), 'Zero address cannot vote');
-            let mut doc = self.document.documents.entry((collection, doc_id)).read();
-            assert(!doc.creator.is_zero() && doc.validation_status != 'deleted', 'Document not found or deleted');
-            assert(doc.creator != voter, 'Cannot vote on own document');
-            assert(!self.document.whitelist_voters.entry((collection, doc_id, voter)).read(), 'Already voted on whitelist');
-            // Record the vote
-            self.document.whitelist_voters.entry((collection, doc_id, voter)).write(true);
-            if vote_remove {
-                doc.whitelist_remove_votes += 1;
-            } else {
-                doc.whitelist_keep_votes += 1;
-            }
-            doc.whitelist_total_voters += 1;
-            self.document.documents.entry((collection, doc_id)).write(doc);
-            // Award 2 points for whitelist voting
-            let current_points = self.user.points.entry(voter).read();
-            let new_points = current_points + VOTE_REWARD_POINTS.try_into().unwrap();
-            self.user.points.entry(voter).write(new_points);
-            self.emit(PointsAwardedForVoting {
-                voter,
-                collection,
-                document_id: doc_id,
-                points_awarded: VOTE_REWARD_POINTS,
-                total_points: new_points,
-                vote_type: 'whitelist',
-                timestamp: get_block_timestamp()
-            });
+
+        fn vote_on_whitelist(ref self: ContractState, collection: felt252, doc_id: felt252) {
+            self._only_not_paused();
+            let caller = get_caller_address();
+            self._only_registered(caller);
+            self._enforce_security(caller, 'whitelist_vote');
+            let mut doc = self.documents.entry((collection, doc_id)).read();
+            assert(doc.validation_status == 'approved', 'Document not approved');
+            assert(!self.whitelist_voters.entry((collection, doc_id, caller)).read(), 'Already voted');
+            self.whitelist_voters.entry((collection, doc_id, caller)).write(true);
+            doc.whitelist_positive_votes += 1;
+            self.documents.entry((collection, doc_id)).write(doc);
+            let mut user = self.users.entry(caller).read();
+            user.points += self.points_per_vote.read();
+            self.users.entry(caller).write(user);
             self.emit(WhitelistVoteSubmitted {
-                voter,
+                voter: caller,
                 collection,
-                document_id: doc_id,
-                creator: doc.creator,
-                vote_remove,
-                remove_votes: doc.whitelist_remove_votes,
-                keep_votes: doc.whitelist_keep_votes,
-                timestamp: get_block_timestamp()
-            });
-            // Check if consensus for whitelisting is reached
-            self._check_whitelist_consensus(collection, doc_id);
-        }
-        /// @notice Get document validation status
-        /// @param collection Collection name
-        /// @param doc_id Document ID
-        /// @return (status, positive_votes, negative_votes, total_votes) Validation details
-        fn get_document_validation_status(
-            self: @ContractState, 
-            collection: felt252, 
-            doc_id: felt252
-        ) -> (felt252, u32, u32, u32) {
-            let doc = self.document.documents.entry((collection, doc_id)).read();
-            assert(!doc.creator.is_zero(), 'Document not found');
-            (doc.validation_status, doc.positive_votes, doc.negative_votes, doc.total_voters)
-        }
-        /// @notice Report malicious data
-        /// @param collection Collection name
-        /// @param doc_id Document ID
-        /// @param reason Reason for reporting
-        fn report_malicious_data(ref self: ContractState, collection: felt252, doc_id: felt252, reason: felt252) {
-            self.only_registered_non_banned();
-            self.only_staked_users();
-            assert(reason != 0, 'Reason cannot be empty');
-            let caller = get_caller_address();
-            let doc = self.document.documents.entry((collection, doc_id)).read();
-            assert(!doc.creator.is_zero(), 'Document not found');
-            assert(doc.creator != caller, 'Cannot report own document');
-            let report_id = self.validation.next_report_id.read();
-            self.validation.next_report_id.write(report_id + 1);
-            let report = MaliciousReport {
-                reporter: caller,
-                collection: collection,
-                doc_id: doc_id,
-                reason: reason,
+                doc_id,
                 timestamp: get_block_timestamp(),
-                is_resolved: false,
-            };
-            self.validation.reports.entry(report_id).write(report);
-            // Update statistics
-            let total_reports = self.validation.total_malicious_reports.read();
-            self.validation.total_malicious_reports.write(total_reports + 1);
-            self.emit(MaliciousDataReported { 
-                reporter: caller, 
-                collection, 
-                doc_id, 
-                creator: doc.creator,
-                reason, 
-                report_id,
-                timestamp: get_block_timestamp()
             });
-        }
-        /// @notice Get pending validations for voting
-        /// @param page Page number
-        /// @return Array<(felt252, felt252)> Array of (collection, doc_id) pairs
-        fn get_pending_validations(self: @ContractState, page: u32) -> Array<(felt252, felt252)> {
-            assert(page > 0, 'Page must be >= 1');
-            let mut result = ArrayTrait::new();
-            let total_pending = self.validation.pending_validations_count.read();
-            let start_idx: u64 = ((page - 1) * 10).into(); // 10 results per page
-            let end_idx = if start_idx + 10 > total_pending { total_pending } else { start_idx + 10 };
-            let mut i: u64 = start_idx;
-            while i < end_idx {
-                let (collection, doc_id) = self.validation.pending_validation_ids.entry(i).read();
-                let doc = self.document.documents.entry((collection, doc_id)).read();
-                if doc.validation_status == 'pending' {
-                    result.append((collection, doc_id));
-                }
-                i += 1;
-            }
-            result
-        }
-        /// @notice Registers a user account
-        fn register_account(ref self: ContractState) {
-            let caller = get_caller_address();
-            assert(!caller.is_zero(), 'Cannot register zero address');
-            assert(self.user.accounts.entry(caller).read() == 0, 'Account already registered');
-            let timestamp = get_block_timestamp();
-            self.user.accounts.entry(caller).write(timestamp);
-            // Initialize user profile
-            let profile = UserProfile {
-                reputation_score: 100, // Starting reputation
-                total_documents: 0,
-                last_action_time: timestamp,
-                is_premium: false,
-                warning_count: 0,
-                total_votes_cast: 0,
-                approved_documents: 0,
-            };
-            self.user.user_profiles.entry(caller).write(profile);
-            // Update statistics
-            self._increment_account_statistics();
-            self.emit(AccountRegistered { account: caller, timestamp });
-        }
-        /// @notice Bans a user from database operations (Admin only)
-        /// @param user_address Address to ban
-        fn ban_user(ref self: ContractState, user_address: ContractAddress) {
-            self.only_admin();
-            assert(!user_address.is_zero(), 'Cannot ban zero address');
-            let caller = get_caller_address();
-            self.user.banned_users.entry(user_address).write(true);
-            // Update reputation severely
-            let mut profile = self.user.user_profiles.entry(user_address).read();
-            let updated_profile = UserProfile {
-                reputation_score: self.config.minimum_reputation_score.read() - 1,
-                total_documents: profile.total_documents,
-                last_action_time: profile.last_action_time,
-                is_premium: profile.is_premium,
-                warning_count: profile.warning_count,
-                total_votes_cast: profile.total_votes_cast,
-                approved_documents: profile.approved_documents,
-            };
-            self.user.user_profiles.entry(user_address).write(updated_profile);
-            self.emit(UserBannedEvent { 
-                banned_user: user_address, 
-                admin: caller, 
-                reason: 'admin_action',
-                timestamp: get_block_timestamp()
-            });
-        }
-        /// @notice Unbans a user, restoring access (Admin only)
-        /// @param user_address Address to unban
-        fn unban_user(ref self: ContractState, user_address: ContractAddress) {
-            self.only_admin();
-            assert(!user_address.is_zero(), 'Cannot unban zero address');
-            let caller = get_caller_address();
-            self.user.banned_users.entry(user_address).write(false);
-            // Reset reputation to neutral
-            let mut profile = self.user.user_profiles.entry(user_address).read();
-            let reset_profile = UserProfile {
-                reputation_score: 0,
-                total_documents: profile.total_documents,
-                last_action_time: profile.last_action_time,
-                is_premium: profile.is_premium,
-                warning_count: 0,
-                total_votes_cast: profile.total_votes_cast,
-                approved_documents: profile.approved_documents,
-            };
-            self.user.user_profiles.entry(user_address).write(reset_profile);
-            self.emit(UserUnbannedEvent { 
-                unbanned_user: user_address, 
-                admin: caller,
-                timestamp: get_block_timestamp()
-            });
-        }
-        /// @notice Gets user profile information
-        /// @param user User address
-        /// @return (reputation, documents, warnings, is_premium, last_action) Profile details
-        fn get_user_profile(
-            self: @ContractState, 
-            user: ContractAddress
-        ) -> (i32, u32, u32, bool, u64) {
-            let profile = self.user.user_profiles.entry(user).read();
-            (
-                profile.reputation_score,
-                profile.total_documents,
-                profile.warning_count,
-                profile.is_premium,
-                profile.last_action_time
-            )
-        }
-        /// @notice Gets total number of registered accounts
-        /// @return u64 Total accounts registered
-        fn get_total_accounts_registered(self: @ContractState) -> u64 {
-            self.config.total_accounts_registered.read()
-        }
-        /// @notice Gets total number of documents inserted
-        /// @return u64 Total documents inserted
-        fn get_total_documents_inserted(self: @ContractState) -> u64 {
-            self.config.total_documents_inserted.read()
-        }
-        /// @notice Gets total database size in bytes
-        /// @return u256 Total database size in bytes
-        fn get_total_database_size_bytes(self: @ContractState) -> u256 {
-            self.config.total_database_size_bytes.read()
-        }
-        /// @notice Gets comprehensive security statistics
-        /// @return (slashed_stakes, malicious_reports, resolved_reports, pending_validations) Security stats
-        fn get_security_statistics(self: @ContractState) -> (u256, u64, u64, u64) {
-            (
-                self.config.total_slashed_stakes.read(),
-                self.validation.total_malicious_reports.read(),
-                self.validation.total_resolved_reports.read(),
-                self.validation.pending_validations_count.read()
-            )
-        }
-        /// @notice Updates all configurable parameters (Admin only)
-        fn update_all_parameters(
-            ref self: ContractState,
-            new_points_per_insert: u32,
-            new_points_per_update: u32,
-            new_points_per_delete: u32,
-            new_points_per_query_page: u32,
-            new_points_threshold_for_claim: u32,
-            new_premium_reward_multiplier: u32,
-            new_badge_threshold: u32,
-            new_points_to_strk_wei: u256,
-        ) {
-            self.only_admin();
-            // Validate all parameters
-            assert(new_points_per_insert > 0, 'Points per insert must be > 0');
-            assert(new_points_per_update > 0, 'Points per update must be > 0');
-            assert(new_points_per_delete > 0, 'Points per delete must be > 0');
-            assert(new_points_per_query_page > 0, 'Points/query> 0');
-            assert(new_points_threshold_for_claim > 0, 'Claim threshold must be > 0');
-            assert(new_premium_reward_multiplier > 0, 'Premium multiplier must be > 0');
-            assert(new_badge_threshold > 0, 'Badge threshold must be > 0');
-            assert(new_points_to_strk_wei > 0, 'Points/STRK > 0');
-            // Update all parameters
-            self.config.points_per_insert.write(new_points_per_insert);
-            self.config.points_per_update.write(new_points_per_update);
-            self.config.points_per_delete.write(new_points_per_delete);
-            self.config.points_per_query_page.write(new_points_per_query_page);
-            self.config.points_threshold_for_claim.write(new_points_threshold_for_claim);
-            self.config.premium_reward_multiplier.write(new_premium_reward_multiplier);
-            self.config.badge_threshold.write(new_badge_threshold);
-            self.config.points_to_strk_wei.write(new_points_to_strk_wei);
-            self.emit(ParametersUpdated {
-                admin: get_caller_address(),
-                new_points_per_insert,
-                new_points_per_update,
-                new_points_per_delete,
-                new_points_per_query_page,
-                new_points_threshold_for_claim,
-                new_premium_reward_multiplier,
-                new_badge_threshold,
-                new_points_to_strk_wei,
-                timestamp: get_block_timestamp()
-            });
-        }
-        /// @notice Updates security parameters (Admin only)
-        fn update_security_parameters(
-            ref self: ContractState, 
-            min_stake: u256, 
-            stake_lock_period: u64, 
-            cooldown_period: u64, 
-            min_reputation: i32,
-            max_pending_time: u64,
-            approval_percentage: i32,
-            slash_percentage: i32,
-            transaction_fee_percent: i32
-        ) {
-            self.only_admin();
-            assert(min_stake > 0, 'Minimum stake must be > 0');
-            assert(stake_lock_period > 0, 'Lock period must be > 0');
-            assert(approval_percentage <= 100, 'Invalid approval percentage');
-            assert(slash_percentage <= 100, 'Invalid slash percentage');
-            assert(transaction_fee_percent <= 100, 'Invalid fee percentage');
-            self.config.minimum_stake_amount.write(min_stake);
-            self.config.stake_lock_period.write(stake_lock_period);
-            self.config.action_cooldown_period.write(cooldown_period);
-            self.config.minimum_reputation_score.write(min_reputation);
-            self.config.max_pending_time.write(max_pending_time);
-            self.config.approval_percentage.write(approval_percentage);
-            self.config.slash_percentage.write(slash_percentage);
-            self.config.transaction_fee_percent.write(transaction_fee_percent);
-            self.emit(SecurityParametersUpdated {
-                admin: get_caller_address(),
-                min_stake,
-                stake_lock_period,
-                cooldown_period,
-                min_reputation,
-                max_pending_time,
-                approval_percentage,
-                slash_percentage,
-                transaction_fee_percent,
-                timestamp: get_block_timestamp()
-            });
-        }
-        /// @notice Slash malicious user's stake (Admin only)
-        /// @param user User to slash
-        /// @param amount Amount to slash
-        /// @param reason Reason for slashing
-        fn slash_malicious_stake(ref self: ContractState, user: ContractAddress, amount: u256, reason: felt252) {
-            self.only_moderator_or_admin();
-            let caller = get_caller_address();
-            let mut stake_info = self.user.user_stakes.entry(user).read();
-            assert(stake_info.amount >= amount, 'Insufficient stake to slash');
-            let locked_stake = StakeInfo {
-                amount: stake_info.amount,
-                stake_time: stake_info.stake_time,
-                unlock_time: stake_info.unlock_time,
-                is_locked: true,
-            };
-            self.user.user_stakes.entry(user).write(locked_stake);
-            // Update reputation severely
-            let mut profile = self.user.user_profiles.entry(user).read();
-            profile.reputation_score -= 100;
-            profile.warning_count += 1;
-            self.user.user_profiles.entry(user).write(profile);
-            // Update slashing statistics
-            let total_slashed = self.config.total_slashed_stakes.read();
-            self.config.total_slashed_stakes.write(total_slashed + amount);
-            self.emit(StakeSlashedEvent { 
-                penalized_user: user, 
-                admin: caller, 
-                slashed_amount: amount, 
-                reason,
-                timestamp: get_block_timestamp()
-            });
-            self.emit(ReputationChangedEvent { 
-                user, 
-                old_reputation: profile.reputation_score + 100, 
-                new_reputation: profile.reputation_score,
-                reason: 'stake_slashed',
-                timestamp: get_block_timestamp()
-            });
-        }
-        /// @notice Force approve a document (Admin only)
-        /// @param collection Collection name
-        /// @param doc_id Document ID
-        fn force_approve_document(ref self: ContractState, collection: felt252, doc_id: felt252) {
-            self.only_moderator_or_admin();
-            self._approve_document(collection, doc_id);
-        }
-        /// @notice Force reject a document (Admin only)
-        /// @param collection Collection name
-        /// @param doc_id Document ID
-        fn force_reject_document(ref self: ContractState, collection: felt252, doc_id: felt252) {
-            self.only_moderator_or_admin();
-            self._reject_document(collection, doc_id);
-        }
-        /// @notice Deletes a document that has been approved for deletion via whitelist voting
-        /// @param collection Collection name
-        /// @param doc_id Document ID
-        fn delete_whitelisted_document(ref self: ContractState, collection: felt252, doc_id: felt252) {
-            self.only_registered_non_banned();
-            let caller = get_caller_address();
-            let doc = self.document.documents.entry((collection, doc_id)).read();
-            assert(!doc.creator.is_zero(), 'Document not found');
-            assert(doc.whitelist_approved_for_deletion, 'Document not approved for deletion');
-            assert(caller == doc.creator || caller == self.config.admin_address.read(), 'Unauthorized');
-            // Deduct points if not premium
-            self._charge_delete_points(caller);
-            // Calculate size for statistics update
-            let doc_size = self._calculate_data_size(@doc.compressed_data);
-            // Remove from indices and clean up
-            self._remove_from_all_indices(collection, doc_id);
-            self._cleanup_document(collection, doc_id);
-            // Update user profile
-            let mut profile = self.user.user_profiles.entry(doc.creator).read();
-            if profile.total_documents > 0 {
-                profile.total_documents -= 1;
-            }
-            if profile.approved_documents > 0 {
-                profile.approved_documents -= 1;
-            }
-            self.user.user_profiles.entry(doc.creator).write(profile);
-            // Update statistics
-            self._decrease_size_statistics(doc_size);
-            self.emit(DocumentDeletedEvent { 
-                caller, 
-                collection, 
-                document_id: doc_id,
-                data_hash: doc.data_hash,
-                creator: doc.creator,
-                timestamp: get_block_timestamp()
-            });
-        }
-        /// @notice Cleans up documents pending validation beyond max_pending_time
-        /// @dev Admin-only function to reject stale pending documents
-        fn cleanup_stale_pending_documents(ref self: ContractState) {
-            self.only_admin();
-            let total_pending = self.validation.pending_validations_count.read();
-            let max_pending_time = self.config.max_pending_time.read();
-            let current_time = get_block_timestamp();
-            let mut i = 0_u64;
-            while i < total_pending {
-                let (collection, doc_id) = self.validation.pending_validation_ids.entry(i).read();
-                let doc = self.document.documents.entry((collection, doc_id)).read();
-                if doc.validation_status == 'pending' && (current_time - doc.created_at) > max_pending_time {
-                    self._reject_document(collection, doc_id);
-                }
-                i += 1;
-            }
-        }
-    }
-
-    // ============================================================================
-    // REWARD SYSTEM (Enhanced with Security)
-    // ============================================================================
-    /// @notice Claims STRK reward based on accumulated points
-    #[external(v0)]
-    fn claim_reward(ref self: ContractState) {
-        let caller = get_caller_address();
-        assert(!self.user.banned_users.entry(caller).read(), 'User is banned');
-        assert(!self.config.is_circuit_breaker_active.read(), 'System maintenance mode');
-        let profile = self.user.user_profiles.entry(caller).read();
-        assert(profile.reputation_score >= 0, 'Reputation too low for claims');
-        assert(profile.warning_count < 5, 'Too many warnings');
-        let stake_info = self.user.user_stakes.entry(caller).read();
-        let min_stake = self.config.minimum_stake_amount.read();
-        assert(stake_info.amount >= min_stake, 'Must maintain minimum stake');
-        assert(!stake_info.is_locked, 'Stake is locked');
-        let current_points = self.user.points.entry(caller).read();
-        let claim_threshold = self.config.points_threshold_for_claim.read();
-        assert(current_points >= claim_threshold.try_into().unwrap(), 'Insufficient points');
-        let fee_points = (current_points * TRANSACTION_FEE_PERCENT.into()) / 100;
-        let points_after_fee = current_points - fee_points;
-        assert(points_after_fee >= claim_threshold.try_into().unwrap(), 'Insufficient points after fee');
-        let points_to_strk = self.config.points_to_strk_wei.read();
-        let base_reward: u256 = points_after_fee.try_into().unwrap() * points_to_strk;
-        let is_premium = self.user.is_user_premium.entry(caller).read();
-        let reward_amount = if is_premium {
-            let multiplier = self.config.premium_reward_multiplier.read();
-            base_reward * multiplier.into()
-        } else {
-            base_reward
-        };
-        // Update state first
-        self.user.points.entry(caller).write(0);
-        let mut updated_profile = profile;
-        updated_profile.reputation_score += 5;
-        self.user.user_profiles.entry(caller).write(updated_profile);
-        // Emit events
-        self.emit(RewardClaimedEvent {
-            claimant: caller,
-            reward_amount: reward_amount,
-            points_used: current_points,
-            is_premium_bonus: is_premium,
-            timestamp: get_block_timestamp()
-        });
-        self.emit(ReputationChangedEvent { 
-            user: caller, 
-            old_reputation: profile.reputation_score, 
-            new_reputation: updated_profile.reputation_score,
-            reason: 'reward_claimed',
-            timestamp: get_block_timestamp()
-        });
-        // Transfer tokens last
-        let strk_token = IERC20Dispatcher { contract_address: self.config.strk_token_address.read() };
-        let success = strk_token.transfer(caller, reward_amount);
-        assert(success, 'Transfer failed');
-    }
-
-    // ============================================================================
-    // VIEW FUNCTIONS (Enhanced)
-    // ============================================================================
-    /// @notice Gets user's current points balance
-    #[external(v0)]
-    fn get_points(self: @ContractState, account: ContractAddress) -> i32 {
-        self.user.points.entry(account).read()
-    }
-    /// @notice Gets user's claimable points after fees
-    #[external(v0)]
-    fn get_claimable_points(self: @ContractState, account: ContractAddress) -> u32 {
-        let current_points = self.user.points.entry(account).read();
-        let claim_threshold = self.config.points_threshold_for_claim.read();
-        if current_points < claim_threshold.try_into().unwrap() {
-            return 0;
-        }
-        let fee_points = (current_points * TRANSACTION_FEE_PERCENT.into()) / 100;
-        let points_after_fee = current_points - fee_points;
-        if points_after_fee >= claim_threshold.try_into().unwrap() {
-            points_after_fee.try_into().unwrap()
-        } else {
-            0
-        }
-    }
-    /// @notice Checks if user has premium status
-    #[external(v0)]
-    fn get_is_user_premium(self: @ContractState, user_address: ContractAddress) -> bool {
-        self.user.is_user_premium.entry(user_address).read()
-    }
-    /// @notice Checks if user is banned
-    #[external(v0)]
-    fn is_user_banned(self: @ContractState, user_address: ContractAddress) -> bool {
-        self.user.banned_users.entry(user_address).read()
-    }
-    /// @notice Checks if user has a specific badge
-    #[external(v0)]
-    fn has_badge(self: @ContractState, account: ContractAddress, badge_id: u64) -> bool {
-        self.user.badges.entry((account, badge_id)).read()
-    }
-    /// @notice Gets admin address
-    #[external(v0)]
-    fn get_admin_address(self: @ContractState) -> ContractAddress {
-        self.config.admin_address.read()
-    }
-    /// @notice Gets STRK token address
-    #[external(v0)]
-    fn get_strk_token_address(self: @ContractState) -> ContractAddress {
-        self.config.strk_token_address.read()
-    }
-    /// @notice Calculates potential reward for user
-    #[external(v0)]
-    fn calculate_reward(self: @ContractState, account: ContractAddress) -> u256 {
-        let current_points = self.user.points.entry(account).read();
-        let claim_threshold = self.config.points_threshold_for_claim.read();
-        if current_points < claim_threshold.try_into().unwrap() {
-            return 0;
-        }
-        let fee_points = (current_points * TRANSACTION_FEE_PERCENT.into()) / 100;
-        let points_after_fee = current_points - fee_points;
-        if points_after_fee < claim_threshold.try_into().unwrap() {
-            return 0;
-        }
-        let points_to_strk = self.config.points_to_strk_wei.read();
-        let base_reward: u256 = points_after_fee.try_into().unwrap() * points_to_strk;
-        if self.user.is_user_premium.entry(account).read() {
-            let multiplier = self.config.premium_reward_multiplier.read();
-            base_reward * multiplier.into()
-        } else {
-            base_reward
-        }
-    }
-    /// @notice Gets all reward parameters
-    #[external(v0)]
-    fn get_reward_parameters(self: @ContractState) -> (u32, u32, u32, u32, u32, u32, u32, u256) {
-        (
-            self.config.points_per_insert.read(),
-            self.config.points_per_update.read(),
-            self.config.points_per_delete.read(),
-            self.config.points_per_query_page.read(),
-            self.config.points_threshold_for_claim.read(),
-            self.config.premium_reward_multiplier.read(),
-            self.config.badge_threshold.read(),
-            self.config.points_to_strk_wei.read()
-        )
-    }
-    /// @notice Gets collection information
-    #[external(v0)]
-    fn get_collection_info(self: @ContractState, collection: felt252) -> (u32, u32, Array<felt252>) {
-        let num_docs = self.collection.num_docs.entry(collection).read();
-        let num_approved = self.collection.approved_docs.entry(collection).read();
-        let num_indexed = self.indexing.num_indexed.entry(collection).read();
-        let mut indexed_fields = ArrayTrait::new();
-        let mut i: u32 = 0; 
-        while i < num_indexed {
-            indexed_fields.append(self.indexing.indexed_fields.entry((collection, i)).read());
-            i += 1;
-        }
-        (num_docs, num_approved, indexed_fields)
-    }
-    /// @notice Checks if user account is registered
-    #[external(v0)]
-    fn is_account_registered(self: @ContractState, user_address: ContractAddress) -> bool {
-        self.user.accounts.entry(user_address).read() != 0
-    }
-    /// @notice Gets comprehensive database statistics
-    #[external(v0)]
-    fn get_database_statistics(self: @ContractState) -> (u64, u64, u256) {
-        (
-            self.config.total_accounts_registered.read(),
-            self.config.total_documents_inserted.read(),
-            self.config.total_database_size_bytes.read()
-        )
-    }
-    /// @notice Checks if user can perform specific action (public view)
-    #[external(v0)]
-    fn can_perform_action(self: @ContractState, user: ContractAddress, _action_type: felt252) -> bool {
-        let stake_info = self.user.user_stakes.entry(user).read();
-        let profile = self.user.user_profiles.entry(user).read();
-        let min_stake = self.config.minimum_stake_amount.read();
-        let min_rep = self.config.minimum_reputation_score.read();
-        stake_info.amount >= min_stake && 
-        profile.reputation_score >= min_rep &&
-        !stake_info.is_locked &&
-        !self.user.banned_users.entry(user).read() &&
-        !self.config.is_circuit_breaker_active.read()
-    }
-    /// @notice Gets comprehensive user security profile
-    #[external(v0)]
-    fn get_user_security_profile(self: @ContractState, user: ContractAddress) -> (i32, u32, u32, u32, bool, u256, u64) {
-        let profile = self.user.user_profiles.entry(user).read();
-        let stake_info = self.user.user_stakes.entry(user).read();
-        (
-            profile.reputation_score,
-            profile.total_documents,
-            profile.warning_count,
-            profile.total_votes_cast,
-            profile.is_premium,
-            stake_info.amount,
-            stake_info.unlock_time
-        )
-    }
-    /// @notice Gets system status
-    #[external(v0)]
-    fn get_system_status(self: @ContractState) -> bool {
-        !self.config.is_circuit_breaker_active.read()
-    }
-
-    // ============================================================================
-    // INTERNAL HELPER FUNCTIONS (Enhanced)
-    // ============================================================================
-    impl InternalImpl of InternalTrait {
-        /// @notice Computes hash of data for integrity verification
-        fn _compute_data_hash(self: @ContractState, data: @ByteArray) -> felt252 {
-            let mut hasher = PoseidonHash::new();
-            hasher = hasher.update(data.len().into());
-            let len = data.len();
-            let mut i: u32 = 0;
-            while i < len {
-                if i + 4 <= len {
-                    let chunk: felt252 = data.at(i).unwrap().into() * 0x1000000
-                                      + data.at(i+1).unwrap().into() * 0x10000
-                                      + data.at(i+2).unwrap().into() * 0x100
-                                      + data.at(i+3).unwrap().into();
-                    hasher = hasher.update(chunk);
-                    i += 4;
-                } else {
-                    hasher = hasher.update(data.at(i).unwrap().into());
-                    i += 1;
-                }
-            }
-            hasher.finalize();
-        }
-         /// @notice Enforces action cooldown
-        fn enforce_cooldown(ref self: ContractState, action_type: felt252) {
-            let caller = get_caller_address();
-            let current_time = get_block_timestamp();
-            let last_action = self.user.user_last_actions.entry((caller, action_type)).read();
-            let cooldown = self.config.action_cooldown_period.read();
-            if last_action + cooldown > current_time {
-                self.emit(CooldownViolation { 
-                    user: caller, 
-                    action_type,
-                    last_action, 
-                    current_time 
-                });
-                assert(false, 'Action on cooldown');
-            }
-            self.user.user_last_actions.entry((caller, action_type)).write(current_time);
-        }
-        /// @notice Enforces rate limiting
-        fn enforce_rate_limit(ref self: ContractState, action_type: felt252, max_per_hour: u32) {
-            let caller = get_caller_address();
-            let current_time = get_block_timestamp();
-            let current_hour = current_time / 3600;
-            let current_count = self.user.user_hourly_actions.entry((caller, action_type, current_hour)).read();
-            if current_count >= max_per_hour {
-                self.emit(RateLimitExceeded { 
-                    user: caller, 
-                    action_type,
-                    current_count, 
-                    max_allowed: max_per_hour,
-                    hour_window: current_hour
-                });
-                assert(false, 'Rate limit exceeded');
-            }
-            self.user.user_hourly_actions.entry((caller, action_type, current_hour)).write(current_count + 1);
-        }
-        /// @notice Check validation consensus based on total registered users
-        fn _check_validation_consensus(ref self: ContractState, collection: felt252, doc_id: felt252) {
-            let doc = self.document.documents.entry((collection, doc_id)).read();
-            let total_users = self.config.total_accounts_registered.read();
-            if total_users == 0 {
-                return;
-            }
-            // Calculate required votes (60% of total users)
-            let required_votes = (total_users * APPROVAL_PERCENTAGE.into()) / 100;
-            let required_votes: u32 = required_votes.try_into().unwrap();
-            if doc.positive_votes >= required_votes {
-                self._approve_document(collection, doc_id);
-            } else if doc.negative_votes >= required_votes {
-                self._reject_document(collection, doc_id);
-            }
-        }
-        /// @notice Approve a document
-        fn _approve_document(ref self: ContractState, collection: felt252, doc_id: felt252) {
-            let timestamp = get_block_timestamp();
-            let mut doc = self.document.documents.entry((collection, doc_id)).read();
-            if doc.validation_status != 'pending' {
-                return;
-            }
-            let creator = doc.creator; // Store creator before modifying doc
-            doc.validation_status = 'approved';
-            self.document.documents.entry((collection, doc_id)).write(doc);
-            let approved_count = self.collection.approved_docs.entry(collection).read();
-            self.collection.approved_doc_ids.entry((collection, approved_count)).write(doc_id);
-            self.collection.approved_docs.entry(collection).write(approved_count + 1);
-            self._remove_from_pending_validations(collection, doc_id);
-            // Award approval points and badge
-            self._award_approval_points_and_badge(creator, collection, doc_id);
-            let mut creator_profile = self.user.user_profiles.entry(creator).read();
-            let old_reputation = creator_profile.reputation_score;
-            creator_profile.reputation_score += 10;
-            creator_profile.approved_documents += 1;
-            self.user.user_profiles.entry(creator).write(creator_profile);
-            self.emit(DocumentApprovedEvent { 
-                collection, 
-                document_id: doc_id, 
-                creator,
-                positive_votes: doc.positive_votes,
-                total_votes: doc.total_voters,
-                timestamp
-            });
-            self.emit(ReputationChangedEvent { 
-                user: creator, 
-                old_reputation, 
-                new_reputation: creator_profile.reputation_score,
-                reason: 'document_approved',
-                timestamp
-            });
-        }
-        /// @notice Reject a document
-        fn _reject_document(ref self: ContractState, collection: felt252, doc_id: felt252) {
-            let mut doc = self.document.documents.entry((collection, doc_id)).read();
-            let old_status = doc.validation_status;
-            let creator = doc.creator; // Store creator before modifying doc
-            doc.validation_status = 'rejected';
-            self.document.documents.entry((collection, doc_id)).write(doc);
-            // Remove from pending validations
-            self._remove_from_pending_validations(collection, doc_id);
-            // Penalize creator
-            let mut creator_profile = self.user.user_profiles.entry(creator).read();
-            let new_reputation = if creator_profile.reputation_score - 20 < self.config.minimum_reputation_score.read() {
-                self.config.minimum_reputation_score.read()
-            } else {
-                creator_profile.reputation_score - 20
-            };
-            creator_profile.reputation_score = new_reputation;
-            creator_profile.warning_count += 1;
-            self.user.user_profiles.entry(creator).write(creator_profile);
-            // Consider slashing stake if multiple rejections
-            if creator_profile.warning_count >= 3 {
-                let mut stake_info = self.user.user_stakes.entry(creator).read();
-                let slash_amount = (stake_info.amount * SLASH_PERCENTAGE.into()) / 100;
-                stake_info.amount -= slash_amount;
-                stake_info.is_locked = true;
-                self.user.user_stakes.entry(creator).write(stake_info);
-                let total_slashed = self.config.total_slashed_stakes.read();
-                self.config.total_slashed_stakes.write(total_slashed + slash_amount);
-                self.emit(StakeSlashedEvent { 
-                    penalized_user: creator, 
-                    admin: get_contract_address(), 
-                    slashed_amount: slash_amount, 
-                    reason: 'repeated_violations',
-                    timestamp: get_block_timestamp()
-                });
-            }
-            self.emit(DocumentStatusChanged { 
-                collection, 
-                doc_id, 
-                creator,
-                old_status, 
-                new_status: 'rejected',
-                timestamp: get_block_timestamp()
-            });
-        }
-        /// @notice Remove document from pending validations list
-        fn _remove_from_pending_validations(ref self: ContractState, collection: felt252, doc_id: felt252) {
-            let total_pending = self.validation.pending_validations_count.read();
-            let mut found_index = total_pending;
-            // Find the document in pending list
-            let mut i: u64 = 0;
-            while i < total_pending {
-                let (pending_collection, pending_doc_id) = self.validation.pending_validation_ids.entry(i).read();
-                if pending_collection == collection && pending_doc_id == doc_id {
-                    found_index = i;
-                    break;
-                }
-                i += 1;
-            }
-            // If found, remove by shifting remaining elements
-            if found_index < total_pending {
-                let mut j = found_index;
-                while j < total_pending - 1 {
-                    let next_item = self.validation.pending_validation_ids.entry(j + 1).read();
-                    self.validation.pending_validation_ids.entry(j).write(next_item);
-                    j += 1;
-                }
-                self.validation.pending_validations_count.write(total_pending - 1);
-            }
-        }
-        /// @notice Process query for approved documents only
-        fn _process_approved_query(self: @ContractState, collection: felt252, query: @Array<(felt252, felt252, felt252, felt252)>) -> Array<felt252> {
-            if query.len() == 0 {
-                return self._get_all_approved_document_ids(collection);
-            }
-            let mut result = ArrayTrait::new();
-            let num_approved = self.collection.approved_docs.entry(collection).read();
-            let mut i: u32 = 0;
-            while i < num_approved {
-                let id = self.collection.approved_doc_ids.entry((collection, i)).read();
-                if self._matches_query(collection, id, query) {
-                    result.append(id);
-                }
-                i += 1;
-            }
-            result
-        }
-        /// @notice Get all approved document IDs
-        fn _get_all_approved_document_ids(self: @ContractState, collection: felt252) -> Array<felt252> {
-            let mut result = ArrayTrait::new();
-            let num_approved = self.collection.approved_docs.entry(collection).read();
-            let mut i: u32 = 0;
-            while i < num_approved {
-                let id = self.collection.approved_doc_ids.entry((collection, i)).read();
-                result.append(id);
-                i += 1;
-            }
-            result
-        }
-        /// @notice Awards points and potentially a badge to a document creator upon approval.
-        fn _award_approval_points_and_badge(
-            ref self: ContractState, 
-            creator: ContractAddress, 
-            collection: felt252, 
-            document_id: felt252
-        ) {
-            let points_to_award = self.config.points_per_insert.read();
-            let current_points = self.user.points.entry(creator).read();
-            let new_points = current_points + points_to_award.try_into().unwrap();
-            self.user.points.entry(creator).write(new_points);
-            // Emit event with correct parameters
-            self.emit(PointsAwardedForApproval { 
-                recipient: creator,
-                collection, 
-                document_id,
-                points_awarded: points_to_award,
-                total_points: new_points,
-                timestamp: get_block_timestamp()
-            });
-            // Check for badge award
-            let badge_threshold = self.config.badge_threshold.read();
-            if new_points >= badge_threshold.try_into().unwrap() && 
-               current_points < badge_threshold.try_into().unwrap() {
-                let timestamp = get_block_timestamp();
-                self.user.badges.entry((creator, timestamp)).write(true);
-                self.emit(BadgeEarnedEvent { 
-                    recipient: creator, 
-                    badge_id: timestamp,
-                    points_threshold: badge_threshold,
-                    timestamp
-                });
-            }
-        }
-        /// @notice Charges points for document updates (premium users exempted)
-        fn _charge_update_points(ref self: ContractState, account: ContractAddress) {
-            if !self.user.is_user_premium.entry(account).read() {
-                let points_to_deduct = self.config.points_per_update.read();
-                let current_points = self.user.points.entry(account).read();
-                assert(current_points >= points_to_deduct.try_into().unwrap(), 'Insufficient points for update');
-                let new_points = current_points - points_to_deduct.try_into().unwrap();
-                self.user.points.entry(account).write(new_points);
-                self.emit(PointsDeducted { 
-                    account, 
-                    points: points_to_deduct, 
-                    total_points: new_points,
-                    action_type: 'update',
-                    timestamp: get_block_timestamp()
-                });
-            }
-        }
-        /// @notice Charges points for document deletion (premium users exempted)
-        fn _charge_delete_points(ref self: ContractState, account: ContractAddress) {
-            if !self.user.is_user_premium.entry(account).read() {
-                let points_to_deduct = self.config.points_per_delete.read();
-                let current_points = self.user.points.entry(account).read();
-                assert(current_points >= points_to_deduct.try_into().unwrap(), 'Insufficient points for delete');
-                let new_points = current_points - points_to_deduct.try_into().unwrap();
-                self.user.points.entry(account).write(new_points);
-                self.emit(PointsDeducted { 
-                    account, 
-                    points: points_to_deduct, 
-                    total_points: new_points,
-                    action_type: 'delete',
-                    timestamp: get_block_timestamp()
-                });
-            }
-        }
-        /// @notice Charges points for query pagination (premium users exempted)
-        fn _charge_query_points(ref self: ContractState, account: ContractAddress) {
-            if !self.user.is_user_premium.entry(account).read() {
-                let points_to_deduct = self.config.points_per_query_page.read();
-                let current_points = self.user.points.entry(account).read();
-                assert(current_points >= points_to_deduct.try_into().unwrap(), 'Insufficient points for query');
-                let new_points = current_points - points_to_deduct.try_into().unwrap();
-                self.user.points.entry(account).write(new_points);
-                self.emit(PointsDeducted { 
-                    account, 
-                    points: points_to_deduct, 
-                    total_points: new_points,
-                    action_type: 'query',
-                    timestamp: get_block_timestamp()
-                });
-            }
-        }
-        /// @notice Check whitelist consensus
-        fn _check_whitelist_consensus(ref self: ContractState, collection: felt252, doc_id: felt252) {
-            let mut doc = self.document.documents.entry((collection, doc_id)).read();
-            let total_users = self.config.total_accounts_registered.read();
-            if total_users == 0 {
-                return;
-            }
-            // Calculate required votes (60% of total users)
-            let required_votes = (total_users * APPROVAL_PERCENTAGE.into()) / 100;
-            let required_votes: u32 = required_votes.try_into().unwrap();
-            if doc.whitelist_remove_votes >= required_votes {
+            if doc.whitelist_positive_votes >= (self.total_accounts.read() * self.approval_percentage.read().into()) / 100 {
                 doc.whitelist_approved_for_deletion = true;
-                self.document.documents.entry((collection, doc_id)).write(doc);
-                self.emit(DocumentWhitelistApproved {
-                    collection,
-                    document_id: doc_id,
-                    creator: doc.creator,
-                    data_hash: doc.data_hash,
-                    remove_votes: doc.whitelist_remove_votes,
-                    total_votes: doc.whitelist_total_voters,
-                    timestamp: get_block_timestamp()
-                });
+                self.documents.entry((collection, doc_id)).write(doc);
             }
         }
-        // ============================================================================
-        // ORIGINAL HELPER FUNCTIONS (Enhanced with Security Checks)
-        // ============================================================================
-        /// @notice Calculates the size of data in bytes
-        fn _calculate_data_size(self: @ContractState, data: @ByteArray) -> u256 {
-            data.len().into()
-        }
-        /// @notice Updates statistics when an account is registered
-        fn _increment_account_statistics(ref self: ContractState) {
-            let current_total = self.config.total_accounts_registered.read();
-            let new_total = current_total + 1;
-            self.config.total_accounts_registered.write(new_total);
-            self.emit(StatisticsUpdated {
-                total_accounts: new_total,
-                total_documents: self.config.total_documents_inserted.read(),
-                total_size_bytes: self.config.total_database_size_bytes.read(),
-                timestamp: get_block_timestamp()
-            });
-        }
-        /// @notice Updates statistics when a document is inserted
-        fn _update_insert_statistics(ref self: ContractState, data: @ByteArray) {
-            let current_docs = self.config.total_documents_inserted.read();
-            let new_docs_total = current_docs + 1;
-            self.config.total_documents_inserted.write(new_docs_total);
-            let data_size = self._calculate_data_size(data);
-            let current_size = self.config.total_database_size_bytes.read();
-            let new_size_total = current_size + data_size;
-            self.config.total_database_size_bytes.write(new_size_total);
-            self.emit(StatisticsUpdated {
-                total_accounts: self.config.total_accounts_registered.read(),
-                total_documents: new_docs_total,
-                total_size_bytes: new_size_total,
-                timestamp: get_block_timestamp()
-            });
-        }
-        /// @notice Updates database size when document is modified
-        fn _update_size_statistics(ref self: ContractState, old_size: u256, new_size: u256) {
-            let current_total = self.config.total_database_size_bytes.read();
-            let new_total = if new_size >= old_size {
-                current_total + (new_size - old_size)
-            } else {
-                current_total - (old_size - new_size)
-            };
-            self.config.total_database_size_bytes.write(new_total);
-            self.emit(StatisticsUpdated {
-                total_accounts: self.config.total_accounts_registered.read(),
-                total_documents: self.config.total_documents_inserted.read(),
-                total_size_bytes: new_total,
-                timestamp: get_block_timestamp()
-            });
-        }
-        /// @notice Decreases database size when document is deleted
-        fn _decrease_size_statistics(ref self: ContractState, size_to_remove: u256) {
-            let current_total = self.config.total_database_size_bytes.read();
-            let new_total = if current_total >= size_to_remove {
-                current_total - size_to_remove
-            } else {
-                0
-            };
-            self.config.total_database_size_bytes.write(new_total);
-            self.emit(StatisticsUpdated {
-                total_accounts: self.config.total_accounts_registered.read(),
-                total_documents: self.config.total_documents_inserted.read(),
-                total_size_bytes: new_total,
-                timestamp: get_block_timestamp()
-            });
-        }
-        /// @notice Stores document fields and updates indices
-        fn _store_fields(ref self: ContractState, collection: felt252, id: felt252, fields: @Array<(felt252, felt252)>) {
-            let len: u32 = fields.len();
-            self.field.field_lengths.entry((collection, id)).write(len);
-            let num_indexed = self.indexing.num_indexed.entry(collection).read(); // Cache storage read
-            let mut i: u32 = 0;
-            while i < len {
-                let (field, value) = *fields.at(i);
-                assert(field != 0, 'Field name cannot be empty');
-                self.field.fields_list.entry((collection, id, i)).write(field);
-                self.field.fields_data.entry((collection, id, field)).write(value);
-                if self._is_indexed(collection, field, num_indexed) { // Pass cached value
-                    let num = self.indexing.index_num_ids.entry((collection, field, value)).read();
-                    self.indexing.index_ids.entry((collection, field, value, num)).write(id);
-                    self.indexing.index_num_ids.entry((collection, field, value)).write(num + 1);
-                }
-                i += 1;
-            }
-        }
-        /// @notice Retrieves all fields for a document
-        fn _get_document_fields(self: @ContractState, collection: felt252, id: felt252) -> Array<(felt252, felt252)> {
-            let mut fields = ArrayTrait::new();
-            let len = self.field.field_lengths.entry((collection, id)).read();
-            let mut i: u32 = 0; 
-            while i < len {
-                let field = self.field.fields_list.entry((collection, id, i)).read();
-                let value = self.field.fields_data.entry((collection, id, field)).read();
-                fields.append((field, value));
-                i += 1;
-            }
-            // Add system fields
-            let doc = self.document.documents.entry((collection, id)).read();
-            fields.append(('created_at', doc.created_at.try_into().unwrap()));
-            fields.append(('updated_at', doc.updated_at.try_into().unwrap()));
-            fields.append(('creator', doc.creator.try_into().unwrap()));
-            fields.append(('status', doc.validation_status));
-            fields
-        }
-        /// @notice Checks if a field is indexed for a collection
-        fn _is_indexed(self: @ContractState, collection: felt252, field: felt252, num_indexed: u32) -> bool {
-            let mut i: u32 = 0;
-            while i < num_indexed {
-                if self.indexing.indexed_fields.entry((collection, i)).read() == field {
-                    return true;
-                }
-                i += 1;
-            }
-            false
-        }
-        /// @notice Removes document from all indices
-        fn _remove_from_all_indices(ref self: ContractState, collection: felt252, id: felt252) {
-            let len = self.field.field_lengths.entry((collection, id)).read();
-            let mut i: u32 = 0;
-            while i < len {
-                let field = self.field.fields_list.entry((collection, id, i)).read();
-                let num_indexed = self.indexing.num_indexed.entry(collection).read();
-                if self._is_indexed(collection, field, num_indexed) {
-                    let value = self.field.fields_data.entry((collection, id, field)).read();
-                    self._remove_from_index(collection, field, value, id);
-                }
-                self.field.fields_data.entry((collection, id, field)).write(0);
-                self.field.fields_list.entry((collection, id, i)).write(0);
-                i += 1;
-            }
-        }
-        /// @notice Removes specific document from an index
-        fn _remove_from_index(ref self: ContractState, collection: felt252, field: felt252, value: felt252, id: felt252) {
-            let num = self.indexing.index_num_ids.entry((collection, field, value)).read();
-            let mut index: u32 = 0;
-            let mut found = false;
-            // Find the document in the index
-            while index < num {
-                if self.indexing.index_ids.entry((collection, field, value, index)).read() == id {
-                    found = true;
-                    break;
-                }
-                index += 1;
-            }
-            if found {
-                // Shift remaining elements
-                let mut k = index;
-                while k < num - 1 {
-                    let next_id = self.indexing.index_ids.entry((collection, field, value, k + 1)).read();
-                    self.indexing.index_ids.entry((collection, field, value, k)).write(next_id);
-                    k += 1;
-                }
-                self.indexing.index_num_ids.entry((collection, field, value)).write(num - 1);
-            }
-        }
-        /// @notice Cleans up document storage after deletion
-        fn _cleanup_document(ref self: ContractState, collection: felt252, id: felt252) {
-            // Clear document data
-            let empty_doc = Document {
-                compressed_data: Default::default(),
-                creator: ContractAddress::default(),
-                created_at: 0,
-                updated_at: 0,
-                data_hash: 0,
-                validation_status: 'deleted',
-                positive_votes: 0,
-                negative_votes: 0,
-                total_voters: 0,
-                whitelist_remove_votes: 0,
-                whitelist_keep_votes: 0,
-                whitelist_total_voters: 0,
-                whitelist_approved_for_deletion: false,
-            };
-            self.document.documents.entry((collection, id)).write(empty_doc);
-            self.document.creators.entry((collection, id)).write(ContractAddress::default());
-            self.field.field_lengths.entry((collection, id)).write(0);
-            // Remove from document list
-            let num = self.collection.num_docs.entry(collection).read();
-            let mut index: u32 = 0;
-            let mut found = false;
-            while index < num {
-                if self.collection.doc_ids.entry((collection, index)).read() == id {
-                    found = true;
-                    break;
-                }
-                index += 1;
-            }
-            if found {
-                // Shift remaining document IDs
-                let mut k = index;
-                while k < num - 1 {
-                    let next_id = self.collection.doc_ids.entry((collection, k + 1)).read();
-                    self.collection.doc_ids.entry((collection, k)).write(next_id);
-                    k += 1;
-                }
-                self.collection.num_docs.entry(collection).write(num - 1);
-            }
-            // Remove from approved documents if it was approved
-            let num_approved = self.collection.approved_docs.entry(collection).read();
-            let mut approved_index: u32 = 0;
-            let mut found_approved = false;
-            while approved_index < num_approved {
-                if self.collection.approved_doc_ids.entry((collection, approved_index)).read() == id {
-                    found_approved = true;
-                    break;
-                }
-                approved_index += 1;
-            }
-            if found_approved {
-                let mut k = approved_index;
-                while k < num_approved - 1 {
-                    let next_id = self.collection.approved_doc_ids.entry((collection, k + 1)).read();
-                    self.collection.approved_doc_ids.entry((collection, k)).write(next_id);
-                    k += 1;
-                }
-                self.collection.approved_docs.entry(collection).write(num_approved - 1);
-            }
-        }
-        /// @notice Processes query conditions and returns matching document IDs (all documents)
-        fn _process_query(self: @ContractState, collection: felt252, query: @Array<(felt252, felt252, felt252, felt252)>) -> Array<felt252> {
-            if query.len() == 0 {
-                return self._get_all_document_ids(collection);
-            }
-            // For simple equality queries on indexed fields, use index
-            let num_indexed = self.indexing.num_indexed.entry(collection).read();
-            if query.len() == 1 {
-                let (field, op, value, _) = *query.at(0);
-                if op == 'eq' && self._is_indexed(collection, field, num_indexed) {
-                    return self._get_indexed_documents(collection, field, value);
-                }
-            }
-            // For complex queries, scan all documents
-            self._scan_documents(collection, query)
-        }
-        /// @notice Gets all document IDs in a collection
-        fn _get_all_document_ids(self: @ContractState, collection: felt252) -> Array<felt252> {
-            let mut result = ArrayTrait::new();
-            let num_docs = self.collection.num_docs.entry(collection).read();
-            let mut i: u32 = 0;
-            while i < num_docs {
-                result.append(self.collection.doc_ids.entry((collection, i)).read());
-                i += 1;
-            }
-            result
-        }
-        /// @notice Gets documents from index for equality query
-        fn _get_indexed_documents(self: @ContractState, collection: felt252, field: felt252, value: felt252) -> Array<felt252> {
-            let mut result = ArrayTrait::new();
-            let num_ids = self.indexing.index_num_ids.entry((collection, field, value)).read();
-            let mut i: u32 = 0;
-            while i < num_ids {
-                result.append(self.indexing.index_ids.entry((collection, field, value, i)).read());
-                i += 1;
-            }
-            result
-        }
-        /// @notice Scans all documents for complex query conditions
-        fn _scan_documents(self: @ContractState, collection: felt252, query: @Array<(felt252, felt252, felt252, felt252)>) -> Array<felt252> {
-            let mut result = ArrayTrait::new();
-            let num_docs = self.collection.num_docs.entry(collection).read();
-            let mut i: u32 = 0;
-            while i < num_docs {
-                let id = self.collection.doc_ids.entry((collection, i)).read();
-                if self._matches_query(collection, id, query) {
-                    result.append(id);
-                }
-                i += 1;
-            }
-            result
-        }
-        /// @notice Checks if document matches query conditions
-        fn _matches_query(self: @ContractState, collection: felt252, id: felt252, query: @Array<(felt252, felt252, felt252, felt252)>) -> bool {
-            let mut i: u32 = 0;
-            while i < query.len() {
-                let (field, op, value, _logical) = *query.at(i);
-                let matches = self._matches_condition(collection, id, field, op, value);
-                // Simple AND logic for now (can be extended for complex logical operations)
-                if !matches {
-                    return false;
-                }
-                i += 1;
-            }
-            true
-        }
-        /// @notice Checks if document field matches a specific condition
-        fn _matches_condition(self: @ContractState, collection: felt252, id: felt252, field: felt252, op: felt252, value: felt252) -> bool {
-            let actual = self.field.fields_data.entry((collection, id, field)).read();
-            match op {
-                'eq' => actual == value,
-                'ne' => actual != value,
-                'gt' => actual > value,
-                'lt' => actual < value,
-                'gte' => actual >= value,
-                'lte' => actual <= value,
-                'exists' => {
-                    // Check if field exists in document
-                    let len = self.field.field_lengths.entry((collection, id)).read();
-                    let mut found = false;
-                    let mut j: u32 = 0;
-                    while j < len {
-                        if self.field.fields_list.entry((collection, id, j)).read() == field {
-                            found = true;
-                            break;
-                        }
-                        j += 1;
-                    }
-                    if value == 1 { found } else { !found }
-                },
-                _ => false,
-            }
-        }
-        /// @notice Paginates query results
-        fn _paginate_results(self: @ContractState, candidates: @Array<felt252>, page: u32) -> Array<felt252> {
-            let mut result = ArrayTrait::new();
-            let start_idx = (page - 1) * QUERY_PAGE_SIZE;
-            let total_len: u32 = candidates.len();
-            if start_idx >= total_len {
-                return result;
-            }
-            let end_idx = if start_idx + QUERY_PAGE_SIZE > total_len {
-                total_len
-            } else {
-                start_idx + QUERY_PAGE_SIZE
-            };
-            let mut i = start_idx;
-            while i < end_idx {
-                result.append(*candidates.at(i));
-                i += 1;
-            }
-            result
-        }
-    }
 
-    // ============================================================================
-    // ADDITIONAL SECURITY FUNCTIONS
-    // ============================================================================
-    /// @notice Process pending documents (Admin function - no auto-approval, just cleanup)
-    #[external(v0)]
-    fn cleanup_processed_pending_documents(ref self: ContractState) {
-        self.only_admin();
-        let total_pending = self.validation.pending_validations_count.read();
-        let mut cleaned_up = 0_u32;
-        let mut i = 0_u64;
-        // Only clean up documents that have already been approved or rejected
-        while i < total_pending && cleaned_up < 50 {
-            let (collection, doc_id) = self.validation.pending_validation_ids.entry(i).read();
-            let doc = self.document.documents.entry((collection, doc_id)).read();
-            if doc.validation_status != 'pending' {
-                // Remove from pending list since it's already processed
-                self._remove_from_pending_validations(collection, doc_id);
-                cleaned_up += 1;
-            }
-            i += 1;
+        fn register_account(ref self: ContractState) {
+            self._only_not_paused();
+            let caller = get_caller_address();
+            let user = self.users.entry(caller).read();
+            assert(user.last_action_time == 0, 'Account already registered');
+            self.users.entry(caller).write(User {
+                stake: StakeInfo { amount: 0, stake_time: 0, is_locked: false },
+                points: 0,
+                total_documents: 0,
+                is_premium: false,
+                is_banned: false,
+                has_good_reputation: true,
+                last_action_time: get_block_timestamp(),
+                hourly_actions: 0,
+            });
+            self.total_accounts.write(self.total_accounts.read() + 1);
+            self.emit(UserRegistered { user: caller, timestamp: get_block_timestamp() });
         }
-    }
-    /// @notice Get documents requiring validation (for validators)
-    #[external(v0)]
-    fn get_documents_for_validation(self: @ContractState, page: u32) -> Array<(felt252, felt252, felt252, ContractAddress)> {
-        assert(page > 0, 'Page must be >= 1');
-        let mut result = ArrayTrait::new();
-        let total_pending = self.validation.pending_validations_count.read();
-        let start_idx: u64 = ((page - 1) * 10).into();
-        let end_idx = if start_idx + 10 > total_pending { total_pending } else { start_idx + 10 };
-        let mut i: u64 = start_idx;
-        while i < end_idx {
-            let (collection, doc_id) = self.validation.pending_validation_ids.entry(i).read();
-            let doc = self.document.documents.entry((collection, doc_id)).read();
-            if doc.validation_status == 'pending' {
-                result.append((collection, doc_id, doc.data_hash, doc.creator));
-            }
-            i += 1;
+
+        fn ban_user(ref self: ContractState, user: ContractAddress) {
+            self._only_admin();
+            self._only_not_paused();
+            let mut user_data = self.users.entry(user).read();
+            assert(user_data.last_action_time != 0, 'User not registered');
+            user_data.is_banned = true;
+            user_data.has_good_reputation = false;
+            self.users.entry(user).write(user_data);
+            self.emit(UserBanned { user, timestamp: get_block_timestamp() });
         }
-        result
-    }
-    /// @notice Emergency function to pause all operations
-    #[external(v0)]
-    fn emergency_pause(ref self: ContractState, reason: felt252) {
-        self.only_admin();
-        let caller = get_caller_address();
-        self.config.is_circuit_breaker_active.write(true);
-        self.emit(CircuitBreakerTriggered { admin: caller, reason, timestamp: get_block_timestamp() });
-    }
-    /// @notice Resume operations after emergency pause
-    #[external(v0)]
-    fn emergency_resume(ref self: ContractState) {
-        self.only_admin();
-        self.config.is_circuit_breaker_active.write(false);
-    }
-    /// @notice Batch approve multiple documents (Admin emergency function)
-    #[external(v0)]
-    fn batch_approve_documents(ref self: ContractState, documents: Array<(felt252, felt252)>) {
-        self.only_moderator_or_admin();
-        let mut i: u32 = 0;
-        while i < documents.len() {
-            let (collection, doc_id) = *documents.at(i);
-            let doc = self.document.documents.entry((collection, doc_id)).read();
-            if doc.validation_status == 'pending' {
-                self._approve_document(collection, doc_id);
-            }
-            i += 1;
+
+        fn unban_user(ref self: ContractState, user: ContractAddress) {
+            self._only_admin();
+            self._only_not_paused();
+            let mut user_data = self.users.entry(user).read();
+            assert(user_data.last_action_time != 0, 'User not registered');
+            user_data.is_banned = false;
+            user_data.has_good_reputation = true;
+            self.users.entry(user).write(user_data);
+            self.emit(UserUnbanned { user, timestamp: get_block_timestamp() });
         }
-    }
-    /// @notice Batch reject multiple documents (Admin emergency function)
-    #[external(v0)]
-    fn batch_reject_documents(ref self: ContractState, documents: Array<(felt252, felt252)>) {
-        self.only_moderator_or_admin();
-        let mut i: u32 = 0;
-        while i < documents.len() {
-            let (collection, doc_id) = *documents.at(i);
-            let doc = self.document.documents.entry((collection, doc_id)).read();
-            if doc.validation_status == 'pending' {
-                self._reject_document(collection, doc_id);
-            }
-            i += 1;
+
+        fn claim_reward(ref self: ContractState) {
+            self._only_not_paused();
+            let caller = get_caller_address();
+            self._only_registered(caller);
+            let mut user = self.users.entry(caller).read();
+            let points = user.points;
+            assert(points > 0, 'No points to claim');
+            let multiplier = if user.is_premium { self.premium_reward_multiplier.read() } else { 1 };
+            let amount = points.into() * self.points_to_strk.read() * multiplier;
+            user.points = 0;
+            self.users.entry(caller).write(user);
+            let strk = IERC20Dispatcher { contract_address: self.strk_token.read() };
+            strk.transfer(caller, amount);
+            self.emit(RewardClaimed { user: caller, amount, timestamp: get_block_timestamp() });
         }
-    }
-    /// @notice Get comprehensive system health metrics
-    #[external(v0)]
-    fn get_system_health(self: @ContractState) -> (u64, u64, u64, u32, bool) {
-        let pending_count = self.validation.pending_validations_count.read();
-        let total_docs = self.config.total_documents_inserted.read();
-        let pending_percentage: u32 = if total_docs > 0 { 
-            ((pending_count * 100) / total_docs).try_into().unwrap()
-        } else { 
-            0 
-        };
-        (
-            self.config.total_accounts_registered.read(),
-            self.config.total_documents_inserted.read(),
-            pending_count,
-            pending_percentage,
-            self.config.is_circuit_breaker_active.read()
-        )
-    }
-    /// @notice Reward active validators with bonus points
-    #[external(v0)]
-    fn reward_active_validators(ref self: ContractState, validators: Array<ContractAddress>, bonus_points: u32) {
-        self.only_admin();
-        let mut i: u32 = 0;
-        while i < validators.len() {
-            let validator = *validators.at(i);
-            let profile = self.user.user_profiles.entry(validator).read();
-            // Only reward if they have cast votes recently
-            if profile.total_votes_cast > 0 {
-                let current_points = self.user.points.entry(validator).read();
-                let new_points = current_points + bonus_points.try_into().unwrap();
-                self.user.points.entry(validator).write(new_points);
-                self.emit(PointsAwarded { 
-                    account: validator, 
-                    points: bonus_points, 
-                    total_points: new_points,
-                    action_type: 'validator_bonus',
-                    timestamp: get_block_timestamp()
-                });
-            }
-            i += 1;
+
+        fn get_user_info(self: @ContractState, user: ContractAddress) -> (u256, bool, u32, bool, bool) {
+            let user_data = self.users.entry(user).read();
+            (user_data.stake.amount, user_data.is_premium, user_data.points, user_data.is_banned, user_data.has_good_reputation)
         }
-    }
-    /// @notice Get user's voting history summary
-    #[external(v0)]
-    fn get_user_voting_stats(self: @ContractState, user: ContractAddress) -> (u32, i32, u32) {
-        let profile = self.user.user_profiles.entry(user).read();
-        let stake_info = self.user.user_stakes.entry(user).read();
-        let vote_power = if stake_info.amount >= self.config.minimum_stake_amount.read() { 
-            if profile.reputation_score > 100 { 2 } else { 1 }
-        } else { 0 };
-        (profile.total_votes_cast, profile.reputation_score, vote_power)
-    }
-    /// @notice Check if document can be voted on it
-    #[external(v0)]
-    fn can_vote_on_document(self: @ContractState, user: ContractAddress, collection: felt252, doc_id: felt252) -> bool {
-        let doc = self.document.documents.entry((collection, doc_id)).read();
-        let has_already_voted = self.document.document_voters.entry((collection, doc_id, user)).read();
-        let stake_info = self.user.user_stakes.entry(user).read();
-        let profile = self.user.user_profiles.entry(user).read();
-        !doc.creator.is_zero() &&
-        doc.validation_status == 'pending' &&
-        doc.creator != user &&
-        !has_already_voted &&
-        stake_info.amount >= self.config.minimum_stake_amount.read() &&
-        profile.reputation_score >= self.config.minimum_reputation_score.read() &&
-        !self.user.banned_users.entry(user).read() &&
-        !self.config.is_circuit_breaker_active.read()
+
+        fn get_stats(self: @ContractState) -> (u64, u64, u256) {
+            (self.total_accounts.read(), self.total_documents.read(), self.total_size.read())
+        }
+
+        fn update_reward_parameters(
+            ref self: ContractState,
+            points_per_insert: u32,
+            points_per_update: u32,
+            points_per_delete: u32,
+            points_per_vote: u32,
+            points_to_strk: u256,
+            premium_reward_multiplier: u256
+        ) {
+            self._only_admin();
+            self._only_not_paused();
+            self.points_per_insert.write(points_per_insert);
+            self.points_per_update.write(points_per_update);
+            self.points_per_delete.write(points_per_delete);
+            self.points_per_vote.write(points_per_vote);
+            self.points_to_strk.write(points_to_strk);
+            self.premium_reward_multiplier.write(premium_reward_multiplier);
+            self.emit(ParametersUpdated { timestamp: get_block_timestamp() });
+        }
     }
 }
