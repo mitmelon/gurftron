@@ -7,6 +7,7 @@ use core::clone::Clone;
 use core::pedersen::pedersen;
 use core::poseidon::PoseidonTrait;
 use core::hash::{HashStateTrait, HashStateExTrait};
+use core::starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
 use starknet::{ContractAddress, get_caller_address, get_block_timestamp, get_contract_address};
 use starknet::contract::ContractDispatcherTrait;
 
