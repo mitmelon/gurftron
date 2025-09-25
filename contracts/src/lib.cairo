@@ -539,7 +539,7 @@ mod GurftronDB {
         // Storage structures
         Document, StakeInfo, UserProfile, MaliciousReport
     };
-    use core::starknet::storage::{Map, StoragePointerReadAccess, StoragePointerWriteAccess};
+    use core::starknet::storage::{Map, StoragePathEntry, StoragePointerReadAccess, StoragePointerWriteAccess};
     use core::num::traits::Zero;
     use core::poseidon::PoseidonHash;
 
@@ -1613,7 +1613,7 @@ mod GurftronDB {
         let current_points = self.points.entry(caller).read();
         let claim_threshold = self.points_threshold_for_claim.read();
         assert(current_points >= claim_threshold.try_into().unwrap(), 'Insufficient points');
-        let fee_points = (current_points * TRANSACTION_FEE_PERCENT.into()) / 100;
+        let fee_points = (current_points as u32 * TRANSACTION_FEE_PERCENT) / 100;
         let points_after_fee = current_points - fee_points;
         assert(points_after_fee >= claim_threshold.try_into().unwrap(), 'Insufficient points after fee');
         let points_to_strk = self.points_to_strk_wei.read();
@@ -1660,7 +1660,7 @@ mod GurftronDB {
         if current_points < claim_threshold.try_into().unwrap() {
             return 0;
         }
-        let fee_points = (current_points * TRANSACTION_FEE_PERCENT.into()) / 100;
+        let fee_points = (current_points as u32 * TRANSACTION_FEE_PERCENT) / 100;
         let points_after_fee = current_points - fee_points;
         if points_after_fee >= claim_threshold.try_into().unwrap() {
             points_after_fee.try_into().unwrap()
@@ -1701,7 +1701,7 @@ mod GurftronDB {
         if current_points < claim_threshold.try_into().unwrap() {
             return 0;
         }
-        let fee_points = (current_points * TRANSACTION_FEE_PERCENT.into()) / 100;
+        let fee_points = (current_points as u32 * TRANSACTION_FEE_PERCENT) / 100;
         let points_after_fee = current_points - fee_points;
         if points_after_fee < claim_threshold.try_into().unwrap() {
             return 0;
@@ -1793,7 +1793,12 @@ mod GurftronDB {
 
     impl InternalImpl of InternalTrait {
         fn _compute_data_hash(self: @ContractState, data: @ByteArray) -> felt252 {
-           pedersen(data.len().into(), if data.len() > 0 { data.at(0).unwrap().into() } else { 0 })
+            let mut state = PoseidonHash::new();
+            state = state.write(data.len().into());
+            if data.len() > 0 {
+                state = state.write(data.at(0).unwrap().into());
+            }
+            state.finalize()
         }
 
         fn enforce_cooldown(ref self: ContractState, action_type: felt252) {
@@ -2237,8 +2242,8 @@ mod GurftronDB {
 
         fn _cleanup_document(ref self: ContractState, collection: felt252, id: felt252) {
             let empty_doc = Document {
-                compressed_data: Default::zero(),
-                creator: ContractAddress::zero(),
+                compressed_data: ContractAddress::from(0_u32),
+                creator: ContractAddress::from(0_u32),
                 created_at: 0,
                 updated_at: 0,
                 data_hash: 0,
@@ -2252,7 +2257,7 @@ mod GurftronDB {
                 whitelist_approved_for_deletion: false,
             };
             self.documents.entry((collection, id)).write(empty_doc);
-            self.creators.entry((collection, id)).write(ContractAddress::zero());
+            self.creators.entry((collection, id)).write(ContractAddress::from(0_u32));
             self.field_lengths.entry((collection, id)).write(0);
             let num = self.num_docs.entry(collection).read();
             let mut index: u32 = 0;
