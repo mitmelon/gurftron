@@ -992,7 +992,7 @@ mod GurftronDB {
             };
             self.documents.entry((collection, id)).write(doc);
             self._store_fields(collection, id, @fields);
-            let pending_count = self.pending_validations_count.entry(()).read();
+            let pending_count = self.pending_validations_count.read();
             self.pending_validation_ids.entry(pending_count).write((collection, id));
             self.pending_validations_count.write(pending_count + 1);
             let mut updated_profile = profile;
@@ -1282,7 +1282,7 @@ mod GurftronDB {
             let doc = self.documents.entry((collection, doc_id)).read();
             assert(!doc.creator.is_zero(), 'Document not found');
             assert(doc.creator != caller, 'Cannot report own document');
-            let report_id = self.next_report_id.entry(()).read();
+            let report_id = self.next_report_id.read();
             self.next_report_id.write(report_id + 1);
             let report = MaliciousReport {
                 reporter: caller,
@@ -1293,7 +1293,7 @@ mod GurftronDB {
                 is_resolved: false,
             };
             self.reports.entry(report_id).write(report);
-            let total_reports = self.total_malicious_reports.entry(()).read();
+            let total_reports = self.total_malicious_reports.read();
             self.total_malicious_reports.write(total_reports + 1);
             self.emit(MaliciousDataReported { 
                 reporter: caller, 
@@ -1309,7 +1309,7 @@ mod GurftronDB {
         fn get_pending_validations(self: @ContractState, page: u32) -> Array<(felt252, felt252)> {
             assert(page > 0, 'Page must be >= 1');
             let mut result = ArrayTrait::new();
-            let total_pending = self.pending_validations_count.entry(()).read();
+            let total_pending = self.pending_validations_count.read();
             let start_idx: u64 = ((page - 1) * 10).into();
             let end_idx = if start_idx + 10 > total_pending { total_pending } else { start_idx + 10 };
             let mut i: u64 = start_idx;
@@ -1406,23 +1406,23 @@ mod GurftronDB {
         }
 
         fn get_total_accounts_registered(self: @ContractState) -> u64 {
-            self.total_accounts_registered.entry(()).read()
+            self.total_accounts_registered.read()
         }
 
         fn get_total_documents_inserted(self: @ContractState) -> u64 {
-            self.total_documents_inserted.entry(()).read()
+            self.total_documents_inserted.read()
         }
 
         fn get_total_database_size_bytes(self: @ContractState) -> u256 {
-            self.total_database_size_bytes.entry(()).read()
+            self.total_database_size_bytes.read()
         }
 
         fn get_security_statistics(self: @ContractState) -> (u256, u64, u64, u64) {
             (
-                self.total_slashed_stakes.entry(()).read(),
-                self.total_malicious_reports.entry(()).read(),
-                self.total_resolved_reports.entry(()).read(),
-                self.pending_validations_count.entry(()).read()
+                self.total_slashed_stakes.read(),
+                self.total_malicious_reports.read(),
+                self.total_resolved_reports.read(),
+                self.pending_validations_count.read()
             )
         }
 
@@ -1446,14 +1446,14 @@ mod GurftronDB {
             assert(new_premium_reward_multiplier > 0, 'Premium multiplier must be > 0');
             assert(new_badge_threshold > 0, 'Badge threshold must be > 0');
             assert(new_points_to_strk_wei > 0, 'Points/STRK > 0');
-            self.points_per_insert.entry(()).write(new_points_per_insert);
-            self.points_per_update.entry(()).write(new_points_per_update);
-            self.points_per_delete.entry(()).write(new_points_per_delete);
-            self.points_per_query_page.entry(()).write(new_points_per_query_page);
-            self.points_threshold_for_claim.entry(()).write(new_points_threshold_for_claim);
-            self.premium_reward_multiplier.entry(()).write(new_premium_reward_multiplier);
-            self.badge_threshold.entry(()).write(new_badge_threshold);
-            self.points_to_strk_wei.entry(()).write(new_points_to_strk_wei);
+            self.points_per_insert.write(new_points_per_insert);
+            self.points_per_update.write(new_points_per_update);
+            self.points_per_delete.write(new_points_per_delete);
+            self.points_per_query_page.write(new_points_per_query_page);
+            self.points_threshold_for_claim.write(new_points_threshold_for_claim);
+            self.premium_reward_multiplier.write(new_premium_reward_multiplier);
+            self.badge_threshold.write(new_badge_threshold);
+            self.points_to_strk_wei.write(new_points_to_strk_wei);
             self.emit(ParametersUpdated {
                 admin: get_caller_address(),
                 new_points_per_insert,
@@ -1485,14 +1485,14 @@ mod GurftronDB {
             assert(approval_percentage <= 100, 'Invalid approval percentage');
             assert(slash_percentage <= 100, 'Invalid slash percentage');
             assert(transaction_fee_percent <= 100, 'Invalid fee percentage');
-            self.minimum_stake_amount.entry(()).write(min_stake);
-            self.stake_lock_period.entry(()).write(stake_lock_period);
-            self.action_cooldown_period.entry(()).write(cooldown_period);
-            self.minimum_reputation_score.entry(()).write(min_reputation);
-            self.max_pending_time.entry(()).write(max_pending_time);
-            self.approval_percentage.entry(()).write(approval_percentage);
-            self.slash_percentage.entry(()).write(slash_percentage);
-            self.transaction_fee_percent.entry(()).write(transaction_fee_percent);
+            self.minimum_stake_amount.write(min_stake);
+            self.stake_lock_period.write(stake_lock_period);
+            self.action_cooldown_period.write(cooldown_period);
+            self.minimum_reputation_score.write(min_reputation);
+            self.max_pending_time.write(max_pending_time);
+            self.approval_percentage.write(approval_percentage);
+            self.slash_percentage.write(slash_percentage);
+            self.transaction_fee_percent.write(transaction_fee_percent);
             self.emit(SecurityParametersUpdated {
                 admin: get_caller_address(),
                 min_stake,
@@ -1523,7 +1523,7 @@ mod GurftronDB {
             profile.reputation_score -= 100;
             profile.warning_count += 1;
             self.user_profiles.entry(user).write(profile);
-            let total_slashed = self.total_slashed_stakes.entry(()).read();
+            let total_slashed = self.total_slashed_stakes.read();
             self.total_slashed_stakes.write(total_slashed + amount);
             self.emit(StakeSlashedEvent { 
                 penalized_user: user, 
@@ -1583,8 +1583,8 @@ mod GurftronDB {
 
         fn cleanup_stale_pending_documents(ref self: ContractState) {
             self.only_admin();
-            let total_pending = self.pending_validations_count.entry(()).read();
-            let max_pending_time = self.max_pending_time.entry(()).read();
+            let total_pending = self.pending_validations_count.read();
+            let max_pending_time = self.max_pending_time.read();
             let current_time = get_block_timestamp();
             let mut i = 0_u64;
             while i < total_pending {
@@ -1607,20 +1607,20 @@ mod GurftronDB {
         assert(profile.reputation_score >= 0, 'Reputation too low for claims');
         assert(profile.warning_count < 5, 'Too many warnings');
         let stake_info = self.user_stakes.entry(caller).read();
-        let min_stake = self.minimum_stake_amount.entry(()).read();
+        let min_stake = self.minimum_stake_amount.read();
         assert(stake_info.amount >= min_stake, 'Must maintain minimum stake');
         assert(!stake_info.is_locked, 'Stake is locked');
         let current_points = self.points.entry(caller).read();
-        let claim_threshold = self.points_threshold_for_claim.entry(()).read();
+        let claim_threshold = self.points_threshold_for_claim.read();
         assert(current_points >= claim_threshold.try_into().unwrap(), 'Insufficient points');
         let fee_points = (current_points * TRANSACTION_FEE_PERCENT.into()) / 100;
         let points_after_fee = current_points - fee_points;
         assert(points_after_fee >= claim_threshold.try_into().unwrap(), 'Insufficient points after fee');
-        let points_to_strk = self.points_to_strk_wei.entry(()).read();
+        let points_to_strk = self.points_to_strk_wei.read();
         let base_reward: u256 = points_after_fee.try_into().unwrap() * points_to_strk;
         let is_premium = self.is_user_premium.entry(caller).read();
         let reward_amount = if is_premium {
-            let multiplier = self.premium_reward_multiplier.entry(()).read();
+            let multiplier = self.premium_reward_multiplier.read();
             base_reward * multiplier.into()
         } else {
             base_reward
@@ -1656,7 +1656,7 @@ mod GurftronDB {
     #[external(v0)]
     fn get_claimable_points(self: @ContractState, account: ContractAddress) -> u32 {
         let current_points = self.points.entry(account).read();
-        let claim_threshold = self.points_threshold_for_claim.entry(()).read();
+        let claim_threshold = self.points_threshold_for_claim.read();
         if current_points < claim_threshold.try_into().unwrap() {
             return 0;
         }
@@ -1697,7 +1697,7 @@ mod GurftronDB {
     #[external(v0)]
     fn calculate_reward(self: @ContractState, account: ContractAddress) -> u256 {
         let current_points = self.points.entry(account).read();
-        let claim_threshold = self.points_threshold_for_claim.entry(()).read();
+        let claim_threshold = self.points_threshold_for_claim.read();
         if current_points < claim_threshold.try_into().unwrap() {
             return 0;
         }
@@ -1706,10 +1706,10 @@ mod GurftronDB {
         if points_after_fee < claim_threshold.try_into().unwrap() {
             return 0;
         }
-        let points_to_strk = self.points_to_strk_wei.entry(()).read();
+        let points_to_strk = self.points_to_strk_wei.read();
         let base_reward: u256 = points_after_fee.try_into().unwrap() * points_to_strk;
         if self.is_user_premium.entry(account).read() {
-            let multiplier = self.premium_reward_multiplier.entry(()).read();
+            let multiplier = self.premium_reward_multiplier.read();
             base_reward * multiplier.into()
         } else {
             base_reward
@@ -1719,14 +1719,14 @@ mod GurftronDB {
     #[external(v0)]
     fn get_reward_parameters(self: @ContractState) -> (u32, u32, u32, u32, u32, u32, u32, u256) {
         (
-            self.points_per_insert.entry(()).read(),
-            self.points_per_update.entry(()).read(),
-            self.points_per_delete.entry(()).read(),
-            self.points_per_query_page.entry(()).read(),
-            self.points_threshold_for_claim.entry(()).read(),
-            self.premium_reward_multiplier.entry(()).read(),
-            self.badge_threshold.entry(()).read(),
-            self.points_to_strk_wei.entry(()).read()
+            self.points_per_insert.read(),
+            self.points_per_update.read(),
+            self.points_per_delete.read(),
+            self.points_per_query_page.read(),
+            self.points_threshold_for_claim.read(),
+            self.premium_reward_multiplier.read(),
+            self.badge_threshold.read(),
+            self.points_to_strk_wei.read()
         )
     }
 
@@ -1752,9 +1752,9 @@ mod GurftronDB {
     #[external(v0)]
     fn get_database_statistics(self: @ContractState) -> (u64, u64, u256) {
         (
-            self.total_accounts_registered.entry(()).read(),
-            self.total_documents_inserted.entry(()).read(),
-            self.total_database_size_bytes.entry(()).read()
+            self.total_accounts_registered.read(),
+            self.total_documents_inserted.read(),
+            self.total_database_size_bytes.read()
         )
     }
 
@@ -1762,8 +1762,8 @@ mod GurftronDB {
     fn can_perform_action(self: @ContractState, user: ContractAddress, _action_type: felt252) -> bool {
         let stake_info = self.user_stakes.entry(user).read();
         let profile = self.user_profiles.entry(user).read();
-        let min_stake = self.minimum_stake_amount.entry(()).read();
-        let min_rep = self.minimum_reputation_score.entry(()).read();
+        let min_stake = self.minimum_stake_amount.read();
+        let min_rep = self.minimum_reputation_score.read();
         stake_info.amount >= min_stake && 
         profile.reputation_score >= min_rep &&
         !stake_info.is_locked &&
@@ -1793,31 +1793,14 @@ mod GurftronDB {
 
     impl InternalImpl of InternalTrait {
         fn _compute_data_hash(self: @ContractState, data: @ByteArray) -> felt252 {
-            let mut hasher = PoseidonHash::new();
-            hasher = hasher.update(data.len().into());
-            let len = data.len();
-            let mut i: u32 = 0;
-            while i < len {
-                if i + 4 <= len {
-                    let chunk: felt252 = data.at(i).unwrap().into() * 0x1000000
-                                      + data.at(i+1).unwrap().into() * 0x10000
-                                      + data.at(i+2).unwrap().into() * 0x100
-                                      + data.at(i+3).unwrap().into();
-                    hasher = hasher.update(chunk);
-                    i += 4;
-                } else {
-                    hasher = hasher.update(data.at(i).unwrap().into());
-                    i += 1;
-                }
-            }
-            hasher.finalize();
+           pedersen(data.len().into(), data.at(0).unwrap_or(0).into())
         }
 
         fn enforce_cooldown(ref self: ContractState, action_type: felt252) {
             let caller = get_caller_address();
             let current_time = get_block_timestamp();
             let last_action = self.user_last_actions.entry((caller, action_type)).read();
-            let cooldown = self.action_cooldown_period.entry(()).read();
+            let cooldown = self.action_cooldown_period.read();
             if last_action + cooldown > current_time {
                 self.emit(CooldownViolation { 
                     user: caller, 
@@ -1850,12 +1833,12 @@ mod GurftronDB {
 
         fn _check_validation_consensus(ref self: ContractState, collection: felt252, doc_id: felt252) {
             let doc = self.documents.entry((collection, doc_id)).read();
-            let total_users = self.total_accounts_registered.entry(()).read();
+            let total_users = self.total_accounts_registered.read();
             if total_users == 0 {
                 return;
             }
-            let required_votes = (total_users * APPROVAL_PERCENTAGE.into()) / 100;
-            let required_votes: u32 = required_votes.try_into().unwrap();
+            let total_u32: u32 = total_users.try_into().unwrap();
+            let required_votes = (total_u32 * APPROVAL_PERCENTAGE) / 100;
             if doc.positive_votes >= required_votes {
                 self._approve_document(collection, doc_id);
             } else if doc.negative_votes >= required_votes {
@@ -1870,8 +1853,11 @@ mod GurftronDB {
                 return;
             }
             let creator = doc.creator;
-            doc.validation_status = 'approved';
-            self.documents.entry((collection, doc_id)).write(doc);
+            let updated_doc = Document {
+                validation_status: 'approved',
+                ..doc
+            };
+            self.documents.entry((collection, doc_id)).write(updated_doc);
             let approved_count = self.approved_docs.entry(collection).read();
             self.approved_doc_ids.entry((collection, approved_count)).write(doc_id);
             self.approved_docs.entry(collection).write(approved_count + 1);
@@ -1907,8 +1893,8 @@ mod GurftronDB {
             self.documents.entry((collection, doc_id)).write(doc);
             self._remove_from_pending_validations(collection, doc_id);
             let mut creator_profile = self.user_profiles.entry(creator).read();
-            let new_reputation = if creator_profile.reputation_score - 20 < self.minimum_reputation_score.entry(()).read() {
-                self.minimum_reputation_score.entry(()).read()
+            let new_reputation = if creator_profile.reputation_score - 20 < self.minimum_reputation_score.read() {
+                self.minimum_reputation_score.read()
             } else {
                 creator_profile.reputation_score - 20
             };
@@ -1921,7 +1907,7 @@ mod GurftronDB {
                 stake_info.amount -= slash_amount;
                 stake_info.is_locked = true;
                 self.user_stakes.entry(creator).write(stake_info);
-                let total_slashed = self.total_slashed_stakes.entry(()).read();
+                let total_slashed = self.total_slashed_stakes.read();
                 self.total_slashed_stakes.write(total_slashed + slash_amount);
                 self.emit(StakeSlashedEvent { 
                     penalized_user: creator, 
@@ -1942,7 +1928,7 @@ mod GurftronDB {
         }
 
         fn _remove_from_pending_validations(ref self: ContractState, collection: felt252, doc_id: felt252) {
-            let total_pending = self.pending_validations_count.entry(()).read();
+            let total_pending = self.pending_validations_count.read();
             let mut found_index = total_pending;
             let mut i: u64 = 0;
             while i < total_pending {
@@ -1999,7 +1985,7 @@ mod GurftronDB {
             collection: felt252, 
             document_id: felt252
         ) {
-            let points_to_award = self.points_per_insert.entry(()).read();
+            let points_to_award = self.points_per_insert.read();
             let current_points = self.points.entry(creator).read();
             let new_points = current_points + points_to_award.try_into().unwrap();
             self.points.entry(creator).write(new_points);
@@ -2011,7 +1997,7 @@ mod GurftronDB {
                 total_points: new_points,
                 timestamp: get_block_timestamp()
             });
-            let badge_threshold = self.badge_threshold.entry(()).read();
+            let badge_threshold = self.badge_threshold.read();
             if new_points >= badge_threshold.try_into().unwrap() && 
                current_points < badge_threshold.try_into().unwrap() {
                 let timestamp = get_block_timestamp();
@@ -2027,7 +2013,7 @@ mod GurftronDB {
 
         fn _charge_update_points(ref self: ContractState, account: ContractAddress) {
             if !self.is_user_premium.entry(account).read() {
-                let points_to_deduct = self.points_per_update.entry(()).read();
+                let points_to_deduct = self.points_per_update.read();
                 let current_points = self.points.entry(account).read();
                 assert(current_points >= points_to_deduct.try_into().unwrap(), 'Insufficient points for update');
                 let new_points = current_points - points_to_deduct.try_into().unwrap();
@@ -2044,7 +2030,7 @@ mod GurftronDB {
 
         fn _charge_delete_points(ref self: ContractState, account: ContractAddress) {
             if !self.is_user_premium.entry(account).read() {
-                let points_to_deduct = self.points_per_delete.entry(()).read();
+                let points_to_deduct = self.points_per_delete.read();
                 let current_points = self.points.entry(account).read();
                 assert(current_points >= points_to_deduct.try_into().unwrap(), 'Insufficient points for delete');
                 let new_points = current_points - points_to_deduct.try_into().unwrap();
@@ -2061,7 +2047,7 @@ mod GurftronDB {
 
         fn _charge_query_points(ref self: ContractState, account: ContractAddress) {
             if !self.is_user_premium.entry(account).read() {
-                let points_to_deduct = self.points_per_query_page.entry(()).read();
+                let points_to_deduct = self.points_per_query_page.read();
                 let current_points = self.points.entry(account).read();
                 assert(current_points >= points_to_deduct.try_into().unwrap(), 'Insufficient points for query');
                 let new_points = current_points - points_to_deduct.try_into().unwrap();
@@ -2078,12 +2064,12 @@ mod GurftronDB {
 
         fn _check_whitelist_consensus(ref self: ContractState, collection: felt252, doc_id: felt252) {
             let mut doc = self.documents.entry((collection, doc_id)).read();
-            let total_users = self.total_accounts_registered.entry(()).read();
+            let total_users = self.total_accounts_registered.read();
             if total_users == 0 {
                 return;
             }
-            let required_votes = (total_users * APPROVAL_PERCENTAGE.into()) / 100;
-            let required_votes: u32 = required_votes.try_into().unwrap();
+            let total_u32: u32 = total_users.try_into().unwrap();
+            let required_votes = (total_u32 * APPROVAL_PERCENTAGE) / 100;
             if doc.whitelist_remove_votes >= required_votes {
                 doc.whitelist_approved_for_deletion = true;
                 self.documents.entry((collection, doc_id)).write(doc);
@@ -2104,27 +2090,27 @@ mod GurftronDB {
         }
 
         fn _increment_account_statistics(ref self: ContractState) {
-            let current_total = self.total_accounts_registered.entry(()).read();
+            let current_total = self.total_accounts_registered.read();
             let new_total = current_total + 1;
             self.total_accounts_registered.write(new_total);
             self.emit(StatisticsUpdated {
                 total_accounts: new_total,
-                total_documents: self.total_documents_inserted.entry(()).read(),
-                total_size_bytes: self.total_database_size_bytes.entry(()).read(),
+                total_documents: self.total_documents_inserted.read(),
+                total_size_bytes: self.total_database_size_bytes.read(),
                 timestamp: get_block_timestamp()
             });
         }
 
         fn _update_insert_statistics(ref self: ContractState, data: @ByteArray) {
-            let current_docs = self.total_documents_inserted.entry(()).read();
+            let current_docs = self.total_documents_inserted.read();
             let new_docs_total = current_docs + 1;
             self.total_documents_inserted.write(new_docs_total);
             let data_size = self._calculate_data_size(data);
-            let current_size = self.total_database_size_bytes.entry(()).read();
+            let current_size = self.total_database_size_bytes.read();
             let new_size_total = current_size + data_size;
             self.total_database_size_bytes.write(new_size_total);
             self.emit(StatisticsUpdated {
-                total_accounts: self.total_accounts_registered.entry(()).read(),
+                total_accounts: self.total_accounts_registered.read(),
                 total_documents: new_docs_total,
                 total_size_bytes: new_size_total,
                 timestamp: get_block_timestamp()
@@ -2132,7 +2118,7 @@ mod GurftronDB {
         }
 
         fn _update_size_statistics(ref self: ContractState, old_size: u256, new_size: u256) {
-            let current_total = self.total_database_size_bytes.entry(()).read();
+            let current_total = self.total_database_size_bytes.read();
             let new_total = if new_size >= old_size {
                 current_total + (new_size - old_size)
             } else {
@@ -2140,15 +2126,15 @@ mod GurftronDB {
             };
             self.total_database_size_bytes.write(new_total);
             self.emit(StatisticsUpdated {
-                total_accounts: self.total_accounts_registered.entry(()).read(),
-                total_documents: self.total_documents_inserted.entry(()).read(),
+                total_accounts: self.total_accounts_registered.read(),
+                total_documents: self.total_documents_inserted.read(),
                 total_size_bytes: new_total,
                 timestamp: get_block_timestamp()
             });
         }
 
         fn _decrease_size_statistics(ref self: ContractState, size_to_remove: u256) {
-            let current_total = self.total_database_size_bytes.entry(()).read();
+            let current_total = self.total_database_size_bytes.read();
             let new_total = if current_total >= size_to_remove {
                 current_total - size_to_remove
             } else {
@@ -2156,8 +2142,8 @@ mod GurftronDB {
             };
             self.total_database_size_bytes.write(new_total);
             self.emit(StatisticsUpdated {
-                total_accounts: self.total_accounts_registered.entry(()).read(),
-                total_documents: self.total_documents_inserted.entry(()).read(),
+                total_accounts: self.total_accounts_registered.read(),
+                total_documents: self.total_documents_inserted.read(),
                 total_size_bytes: new_total,
                 timestamp: get_block_timestamp()
             });
@@ -2421,7 +2407,7 @@ mod GurftronDB {
     #[external(v0)]
     fn cleanup_processed_pending_documents(ref self: ContractState) {
         self.only_admin();
-        let total_pending = self.pending_validations_count.entry(()).read();
+        let total_pending = self.pending_validations_count.read();
         let mut cleaned_up = 0_u32;
         let mut i = 0_u64;
         while i < total_pending && cleaned_up < 50 {
@@ -2439,7 +2425,7 @@ mod GurftronDB {
     fn get_documents_for_validation(self: @ContractState, page: u32) -> Array<(felt252, felt252, felt252, ContractAddress)> {
         assert(page > 0, 'Page must be >= 1');
         let mut result = ArrayTrait::new();
-        let total_pending = self.pending_validations_count.entry(()).read();
+        let total_pending = self.pending_validations_count.read();
         let start_idx: u64 = ((page - 1) * 10).into();
         let end_idx = if start_idx + 10 > total_pending { total_pending } else { start_idx + 10 };
         let mut i: u64 = start_idx;
@@ -2458,14 +2444,14 @@ mod GurftronDB {
     fn emergency_pause(ref self: ContractState, reason: felt252) {
         self.only_admin();
         let caller = get_caller_address();
-        self.is_circuit_breaker_active.entry(()).write(true);
+        self.is_circuit_breaker_active.write(true);
         self.emit(CircuitBreakerTriggered { admin: caller, reason, timestamp: get_block_timestamp() });
     }
 
     #[external(v0)]
     fn emergency_resume(ref self: ContractState) {
         self.only_admin();
-        self.is_circuit_breaker_active.entry(()).write(false);
+        self.is_circuit_breaker_active.write(false);
     }
 
     #[external(v0)]
@@ -2498,19 +2484,19 @@ mod GurftronDB {
 
     #[external(v0)]
     fn get_system_health(self: @ContractState) -> (u64, u64, u64, u32, bool) {
-        let pending_count = self.pending_validations_count.entry(()).read();
-        let total_docs = self.total_documents_inserted.entry(()).read();
+        let pending_count = self.pending_validations_count.read();
+        let total_docs = self.total_documents_inserted.read();
         let pending_percentage: u32 = if total_docs > 0 { 
             ((pending_count * 100) / total_docs).try_into().unwrap()
         } else { 
             0 
         };
         (
-            self.total_accounts_registered.entry(()).read(),
-            self.total_documents_inserted.entry(()).read(),
+            self.total_accounts_registered.read(),
+            self.total_documents_inserted.read(),
             pending_count,
             pending_percentage,
-            self.is_circuit_breaker_active.entry(()).read()
+            self.is_circuit_breaker_active.read()
         )
     }
 
@@ -2541,7 +2527,7 @@ mod GurftronDB {
     fn get_user_voting_stats(self: @ContractState, user: ContractAddress) -> (u32, i32, u32) {
         let profile = self.user_profiles.entry(user).read();
         let stake_info = self.user_stakes.entry(user).read();
-        let vote_power = if stake_info.amount >= self.minimum_stake_amount.entry(()).read() { 
+        let vote_power = if stake_info.amount >= self.minimum_stake_amount.read() { 
             if profile.reputation_score > 100 { 2 } else { 1 }
         } else { 0 };
         (profile.total_votes_cast, profile.reputation_score, vote_power)
@@ -2557,9 +2543,9 @@ mod GurftronDB {
         doc.validation_status == 'pending' &&
         doc.creator != user &&
         !has_already_voted &&
-        stake_info.amount >= self.minimum_stake_amount.entry(()).read() &&
-        profile.reputation_score >= self.minimum_reputation_score.entry(()).read() &&
+        stake_info.amount >= self.minimum_stake_amount.read() &&
+        profile.reputation_score >= self.minimum_reputation_score.read() &&
         !self.banned_users.entry(user).read() &&
-        !self.is_circuit_breaker_active.entry(()).read()
+        !self.is_circuit_breaker_active.read()
     }
 }
