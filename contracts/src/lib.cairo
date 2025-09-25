@@ -600,6 +600,7 @@ mod GurftronDB {
         Document, StakeInfo, UserProfile, MaliciousReport
     };
     use core::num::traits::Zero;
+    use starknet::ContractAddress;
     use starknet::storage::{Map, StoragePointerReadAccess, StoragePointerWriteAccess};
     use core::array::{ArrayTrait, SpanTrait};
     use core::byte_array::ByteArrayTrait;
@@ -608,6 +609,7 @@ mod GurftronDB {
     use core::pedersen::pedersen;
     use core::poseidon::PoseidonTrait;
     use core::hash::{HashStateTrait, HashStateExTrait};
+
 
     // ============================================================================
     // ENHANCED CONSTANTS
@@ -1758,11 +1760,11 @@ mod GurftronDB {
             assert(new_points_per_insert > 0, 'Points per insert must be > 0');
             assert(new_points_per_update > 0, 'Points per update must be > 0');
             assert(new_points_per_delete > 0, 'Points per delete must be > 0');
-            assert(new_points_per_query_page > 0, 'Points/query must be > 0');
+            assert(new_points_per_query_page > 0, 'Points/query> 0');
             assert(new_points_threshold_for_claim > 0, 'Claim threshold must be > 0');
             assert(new_premium_reward_multiplier > 0, 'Premium multiplier must be > 0');
             assert(new_badge_threshold > 0, 'Badge threshold must be > 0');
-            assert(new_points_to_strk_wei > 0, 'Points/STRK must be > 0'');
+            assert(new_points_to_strk_wei > 0, 'Points/STRK > 0');
             
             // Update all parameters
             self.points_per_insert.write(new_points_per_insert);
@@ -2176,7 +2178,6 @@ mod GurftronDB {
     // ============================================================================
     // INTERNAL HELPER FUNCTIONS (Enhanced)
     // ============================================================================
-    #[generate_trait]
     impl InternalImpl of InternalTrait {
         /// @notice Computes hash of data for integrity verification
         fn _compute_data_hash(self: @ContractState, data: @ByteArray) -> felt252 {
