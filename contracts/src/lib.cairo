@@ -1,15 +1,13 @@
-use core::num::traits::Zero;
+use starknet::{ContractAddress, get_caller_address, get_block_timestamp, get_contract_address};
+use starknet::contract::ContractDispatcherTrait;
 use core::array::ArrayTrait;
 use core::byte_array::ByteArray;
 use core::option::OptionTrait;
 use core::traits::{TryInto, Into};
 use core::clone::Clone;
 use core::pedersen::pedersen;
-use core::poseidon::PoseidonTrait;
 use core::hash::{HashStateTrait, HashStateExTrait};
-use core::starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
-use starknet::{ContractAddress, get_caller_address, get_block_timestamp, get_contract_address};
-use starknet::contract::ContractDispatcherTrait;
+
 
 
 /// @title IERC20 Interface for STRK token interactions
@@ -580,6 +578,11 @@ mod GurftronDB {
         // Storage structures
         Document, StakeInfo, UserProfile, MaliciousReport
     };
+
+    use core::starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
+    use core::num::traits::Zero;
+    use core::poseidon::PoseidonHash;
+
    
     trait ModifierTrait {
         fn only_moderator_or_admin(self: @ContractState);
@@ -627,7 +630,6 @@ mod GurftronDB {
         fn _update_size_statistics(ref self: ContractState, old_size: u256, new_size: u256);
         fn _decrease_size_statistics(ref self: ContractState, size: u256);
         fn _store_fields(ref self: ContractState, collection: felt252, id: felt252, fields: @Array<(felt252, felt252)>);
-        fn cleanup_stale_pending_documents(ref self: ContractState);
         fn enforce_cooldown(ref self: ContractState, action_type: felt252);
         fn enforce_rate_limit(ref self: ContractState, action_type: felt252, max_per_hour: u32);
     }
@@ -2039,7 +2041,7 @@ mod GurftronDB {
         assert(points_after_fee >= claim_threshold.try_into().unwrap(), 'Insufficient points after fee');
         
         let points_to_strk = self.points_to_strk_wei.read();
-        let base_reward: u256 = points_after_fee.try_into().unwrap() * points_to_strk;
+        let base_reward: u256 = (points_after_fee as u256) * points_to_strk;
         
         let is_premium = self.is_user_premium.read(caller);
         let reward_amount = if is_premium {
@@ -2255,9 +2257,9 @@ mod GurftronDB {
     impl InternalImpl of InternalTrait {
         /// @notice Computes hash of data for integrity verification
         fn _compute_data_hash(self: @ContractState, data: @ByteArray) -> felt252 {
-            let mut hash_state = PoseidonTrait::new();
-            hash_state = hash_state.update(data.len().into());
-            
+            let mut hasher = PoseidonHash::new();
+            hasher = hasher.update(data.len().into());
+
             let len = data.len();
             let mut i: u32 = 0;
             while i < len {
@@ -2266,14 +2268,14 @@ mod GurftronDB {
                                       + data.at(i+1).unwrap().into() * 0x10000
                                       + data.at(i+2).unwrap().into() * 0x100
                                       + data.at(i+3).unwrap().into();
-                    hash_state = hash_state.update(chunk);
+                    hasher = hasher.update(chunk);
                     i += 4;
                 } else {
-                    hash_state = hash_state.update(data.at(i).unwrap().into());
+                    hasher = hasher.update(data.at(i).unwrap().into());
                     i += 1;
                 }
             }
-            hash_state.finalize()
+            hasher.finalize();
         }
 
          /// @notice Enforces action cooldown
@@ -2806,7 +2808,7 @@ mod GurftronDB {
             // Clear document data
             let empty_doc = Document {
                 compressed_data: Default::default(),
-                creator: ContractAddress::from(0_u32),
+                creator: ContractAddress::default(),
                 created_at: 0,
                 updated_at: 0,
                 data_hash: 0,
@@ -2820,7 +2822,7 @@ mod GurftronDB {
                 whitelist_approved_for_deletion: false,
             };
             self.documents.write((collection, id), empty_doc);
-            self.creators.write((collection, id), ContractAddress::from(0_u32));
+            self.creators.write((collection, id), ContractAddress::default());
             self.field_lengths.write((collection, id), 0);
             
             // Remove from document list
