@@ -101,6 +101,29 @@ trait IDatabase<TContractState> {
     fn cleanup_stale_pending_documents(ref self: TContractState);
 }
 
+#[starknet::interface]
+trait InternalTrait<ContractState> {
+    fn _charge_query_points(ref self: ContractState, account: ContractAddress);
+    fn _charge_update_points(ref self: ContractState, account: ContractAddress);
+    fn _charge_delete_points(ref self: ContractState, account: ContractAddress);
+    fn _decrease_size_statistics(ref self: ContractState, size: u256);
+    fn _approve_document(ref self: ContractState, collection: felt252, doc_id: felt252);
+    fn _reject_document(ref self: ContractState, collection: felt252, doc_id: felt252);
+    fn _remove_from_pending_validations(ref self: ContractState, collection: felt252, doc_id: felt252);
+    fn _award_approval_points_and_badge(ref self: ContractState, creator: ContractAddress, collection: felt252, document_id: felt252);
+    fn _check_validation_consensus(ref self: ContractState, collection: felt252, doc_id: felt252);
+    fn _check_whitelist_consensus(ref self: ContractState, collection: felt252, doc_id: felt252);
+    fn _remove_from_all_indices(ref self: ContractState, collection: felt252, id: felt252);
+    fn _remove_from_index(ref self: ContractState, collection: felt252, field: felt252, value: felt252, id: felt252);
+    fn _cleanup_document(ref self: ContractState, collection: felt252, id: felt252);
+    fn _increment_account_statistics(ref self: ContractState);
+    fn _update_insert_statistics(ref self: ContractState, data: @ByteArray);
+    fn _update_size_statistics(ref self: ContractState, old_size: u256, new_size: u256);
+    fn _store_fields(ref self: ContractState, collection: felt252, id: felt252, fields: @Array<(felt252, felt252)>);
+    fn enforce_cooldown(ref self: ContractState, action_type: felt252);
+    fn enforce_rate_limit(ref self: ContractState, action_type: felt252, max_per_hour: u32);
+}
+
 /// @title Enhanced Event Definitions with Specific Names
 /// @notice All events emitted by the contract for tracking operations and rewards
 
@@ -576,6 +599,7 @@ mod GurftronDB {
         // Storage structures
         Document, StakeInfo, UserProfile, MaliciousReport
     };
+    use core::num::traits::Zero;
     use starknet::storage::{Map, StoragePointerReadAccess, StoragePointerWriteAccess};
     use core::array::{ArrayTrait, SpanTrait};
     use core::byte_array::ByteArrayTrait;
@@ -875,45 +899,6 @@ mod GurftronDB {
         /// @notice Validates query conditions length
         fn validate_query(self: @ContractState, query: @Array<(felt252, felt252, felt252, felt252)>) {
             assert(query.len() <= MAX_QUERY_CONDITIONS, 'Too many query conditions');
-        }
-
-        /// @notice Enforces action cooldown
-        fn enforce_cooldown(ref self: ContractState, action_type: felt252) {
-            let caller = get_caller_address();
-            let current_time = get_block_timestamp();
-            let last_action = self.user_last_actions.read((caller, action_type));
-            let cooldown = self.action_cooldown_period.read();
-            
-            if last_action + cooldown > current_time {
-                self.emit(CooldownViolation { 
-                    user: caller, 
-                    action_type,
-                    last_action, 
-                    current_time 
-                });
-                assert(false, 'Action on cooldown');
-            }
-            self.user_last_actions.write((caller, action_type), current_time);
-        }
-
-        /// @notice Enforces rate limiting
-        fn enforce_rate_limit(ref self: ContractState, action_type: felt252, max_per_hour: u32) {
-            let caller = get_caller_address();
-            let current_time = get_block_timestamp();
-            let current_hour = current_time / 3600;
-            let current_count = self.user_hourly_actions.read((caller, action_type, current_hour));
-            
-            if current_count >= max_per_hour {
-                self.emit(RateLimitExceeded { 
-                    user: caller, 
-                    action_type,
-                    current_count, 
-                    max_allowed: max_per_hour,
-                    hour_window: current_hour
-                });
-                assert(false, 'Rate limit exceeded');
-            }
-            self.user_hourly_actions.write((caller, action_type, current_hour), current_count + 1);
         }
 
         /// @notice Validates data integrity and size
@@ -1773,11 +1758,11 @@ mod GurftronDB {
             assert(new_points_per_insert > 0, 'Points per insert must be > 0');
             assert(new_points_per_update > 0, 'Points per update must be > 0');
             assert(new_points_per_delete > 0, 'Points per delete must be > 0');
-            assert(new_points_per_query_page > 0, 'Points per query page must be > 0');
+            assert(new_points_per_query_page > 0, 'Points/query must be > 0');
             assert(new_points_threshold_for_claim > 0, 'Claim threshold must be > 0');
             assert(new_premium_reward_multiplier > 0, 'Premium multiplier must be > 0');
             assert(new_badge_threshold > 0, 'Badge threshold must be > 0');
-            assert(new_points_to_strk_wei > 0, 'Points to STRK ratio must be > 0');
+            assert(new_points_to_strk_wei > 0, 'Points/STRK must be > 0'');
             
             // Update all parameters
             self.points_per_insert.write(new_points_per_insert);
@@ -2216,6 +2201,45 @@ mod GurftronDB {
             hash_state.finalize()
         }
 
+         /// @notice Enforces action cooldown
+        fn enforce_cooldown(ref self: ContractState, action_type: felt252) {
+            let caller = get_caller_address();
+            let current_time = get_block_timestamp();
+            let last_action = self.user_last_actions.read((caller, action_type));
+            let cooldown = self.action_cooldown_period.read();
+            
+            if last_action + cooldown > current_time {
+                self.emit(CooldownViolation { 
+                    user: caller, 
+                    action_type,
+                    last_action, 
+                    current_time 
+                });
+                assert(false, 'Action on cooldown');
+            }
+            self.user_last_actions.write((caller, action_type), current_time);
+        }
+
+        /// @notice Enforces rate limiting
+        fn enforce_rate_limit(ref self: ContractState, action_type: felt252, max_per_hour: u32) {
+            let caller = get_caller_address();
+            let current_time = get_block_timestamp();
+            let current_hour = current_time / 3600;
+            let current_count = self.user_hourly_actions.read((caller, action_type, current_hour));
+            
+            if current_count >= max_per_hour {
+                self.emit(RateLimitExceeded { 
+                    user: caller, 
+                    action_type,
+                    current_count, 
+                    max_allowed: max_per_hour,
+                    hour_window: current_hour
+                });
+                assert(false, 'Rate limit exceeded');
+            }
+            self.user_hourly_actions.write((caller, action_type, current_hour), current_count + 1);
+        }
+
         /// @notice Check validation consensus based on total registered users
         fn _check_validation_consensus(ref self: ContractState, collection: felt252, doc_id: felt252) {
             let doc = self.documents.read((collection, doc_id));
@@ -2601,6 +2625,24 @@ mod GurftronDB {
                 timestamp: get_block_timestamp()
             });
         }
+
+        /// @notice Decreases database size when document is deleted
+        fn _decrease_size_statistics(ref self: ContractState, size_to_remove: u256) {
+            let current_total = self.total_database_size_bytes.read();
+            let new_total = if current_total >= size_to_remove {
+                current_total - size_to_remove
+            } else {
+                0
+            };
+            self.total_database_size_bytes.write(new_total);
+            
+            self.emit(StatisticsUpdated {
+                total_accounts: self.total_accounts_registered.read(),
+                total_documents: self.total_documents_inserted.read(),
+                total_size_bytes: new_total,
+                timestamp: get_block_timestamp()
+            });
+        }
         
         /// @notice Stores document fields and updates indices
         fn _store_fields(ref self: ContractState, collection: felt252, id: felt252, fields: @Array<(felt252, felt252)>) {
@@ -2709,7 +2751,7 @@ mod GurftronDB {
             // Clear document data
             let empty_doc = Document {
                 compressed_data: Default::default(),
-                creator: starknet::contract_address_const::<0>(),
+                creator: ContractAddress::from(0_u32),
                 created_at: 0,
                 updated_at: 0,
                 data_hash: 0,
@@ -2723,7 +2765,7 @@ mod GurftronDB {
                 whitelist_approved_for_deletion: false,
             };
             self.documents.write((collection, id), empty_doc);
-            self.creators.write((collection, id), starknet::contract_address_const::<0>());
+            self.creators.write((collection, id), ContractAddress::from(0_u32));
             self.field_lengths.write((collection, id), 0);
             
             // Remove from document list
