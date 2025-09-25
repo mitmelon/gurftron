@@ -1,4 +1,5 @@
 use starknet::{ContractAddress, get_caller_address, get_block_timestamp, get_contract_address};
+use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess, StorageMapReadAccess, StorageMapWriteAccess};
 use core::array::{ArrayTrait, SpanTrait};
 use core::byte_array::ByteArrayTrait;
 use core::option::OptionTrait;
@@ -7,6 +8,8 @@ use core::clone::Clone;
 use core::pedersen::pedersen;
 use core::poseidon::PoseidonTrait;
 use core::hash::{HashStateTrait, HashStateExTrait};
+use core::num::traits::Zero;
+
 
 /// @title IERC20 Interface for STRK token interactions
 /// @notice Interface for ERC20 token operations required by the contract
@@ -101,7 +104,6 @@ trait IDatabase<TContractState> {
     fn cleanup_stale_pending_documents(ref self: TContractState);
 }
 
-#[starknet::interface]
 trait InternalTrait<ContractState> {
     fn _charge_query_points(ref self: ContractState, account: ContractAddress);
     fn _charge_update_points(ref self: ContractState, account: ContractAddress);
@@ -533,7 +535,7 @@ struct SecurityParametersUpdated {
 }
 
 /// @title Enhanced Storage Structures
-#[derive(Copy, Drop, Serde, starknet::Store)]
+#[derive(Drop, Serde, starknet::Store)]
 struct Document {
     compressed_data: ByteArray,
     creator: ContractAddress,
@@ -599,18 +601,7 @@ mod GurftronDB {
         // Storage structures
         Document, StakeInfo, UserProfile, MaliciousReport
     };
-    use core::num::traits::Zero;
-    use starknet::ContractAddress;
-    use starknet::storage::{Map, StoragePointerReadAccess, StoragePointerWriteAccess};
-    use core::array::{ArrayTrait, SpanTrait};
-    use core::byte_array::ByteArrayTrait;
-    use core::option::OptionTrait;
-    use core::traits::{TryInto, Into};
-    use core::pedersen::pedersen;
-    use core::poseidon::PoseidonTrait;
-    use core::hash::{HashStateTrait, HashStateExTrait};
-
-
+   
     // ============================================================================
     // ENHANCED CONSTANTS
     // ============================================================================
@@ -1067,8 +1058,13 @@ mod GurftronDB {
         fn emergency_unlock_stake(ref self: ContractState, user: ContractAddress) {
             self.only_admin();
             let mut stake_info = self.user_stakes.read(user);
-            stake_info.is_locked = false;
-            self.user_stakes.write(user, stake_info);
+            let updated_stake = StakeInfo {
+                amount: stake_info.amount,
+                stake_time: stake_info.stake_time, 
+                unlock_time: stake_info.unlock_time,
+                is_locked: false,
+            };
+            self.user_stakes.write(user, updated_stake);
         }
 
         /// @notice Creates a new collection with specified indexed fields
@@ -1247,16 +1243,23 @@ mod GurftronDB {
             // Update document and reset validation status
             let timestamp = get_block_timestamp();
             let data_hash = self._compute_data_hash(@compressed_data);
-            
-            let mut doc = old_doc.clone();
-            doc.compressed_data = compressed_data;
-            doc.updated_at = timestamp;
-            doc.data_hash = data_hash;
-            doc.validation_status = 'pending';
-            doc.positive_votes = 0;
-            doc.negative_votes = 0;
-            doc.total_voters = 0;
-            self.documents.write((collection, id), doc);
+        
+            let updated_doc = Document {
+                compressed_data: compressed_data,
+                creator: old_doc.creator,
+                created_at: old_doc.created_at,
+                updated_at: timestamp,
+                data_hash: data_hash,
+                validation_status: 'pending',
+                positive_votes: 0,
+                negative_votes: 0,
+                total_voters: 0,
+                whitelist_remove_votes: old_doc.whitelist_remove_votes,
+                whitelist_keep_votes: old_doc.whitelist_keep_votes,
+                whitelist_total_voters: old_doc.whitelist_total_voters,
+                whitelist_approved_for_deletion: old_doc.whitelist_approved_for_deletion,
+            };
+            self.documents.write((collection, id), updated_doc);
             
             // Update fields and indices
             self._remove_from_all_indices(collection, id);
@@ -1663,9 +1666,17 @@ mod GurftronDB {
             
             // Update reputation severely
             let mut profile = self.user_profiles.read(user_address);
-            profile.reputation_score = self.minimum_reputation_score.read() - 1;
-            profile.warning_count += 1;
-            self.user_profiles.write(user_address, profile);
+            
+            let updated_profile = UserProfile {
+                reputation_score: self.minimum_reputation_score.read() - 1,
+                total_documents: profile.total_documents,
+                last_action_time: profile.last_action_time,
+                is_premium: profile.is_premium,
+                warning_count: profile.warning_count,
+                total_votes_cast: profile.total_votes_cast,
+                approved_documents: profile.approved_documents,
+            };
+            self.user_profiles.write(user_address, updated_profile);
             
             self.emit(UserBannedEvent { 
                 banned_user: user_address, 
@@ -1686,9 +1697,18 @@ mod GurftronDB {
             
             // Reset reputation to neutral
             let mut profile = self.user_profiles.read(user_address);
-            profile.reputation_score = 0;
-            profile.warning_count = 0;
-            self.user_profiles.write(user_address, profile);
+
+            let reset_profile = UserProfile {
+                reputation_score: 0,
+                total_documents: profile.total_documents,
+                last_action_time: profile.last_action_time,
+                is_premium: profile.is_premium,
+                warning_count: 0,
+                total_votes_cast: profile.total_votes_cast,
+                approved_documents: profile.approved_documents,
+            };
+
+            self.user_profiles.write(user_address, reset_profile);
             
             self.emit(UserUnbannedEvent { 
                 unbanned_user: user_address, 
@@ -1843,10 +1863,14 @@ mod GurftronDB {
             
             let mut stake_info = self.user_stakes.read(user);
             assert(stake_info.amount >= amount, 'Insufficient stake to slash');
-            
-            stake_info.amount -= amount;
-            stake_info.is_locked = true; // Lock remaining stake
-            self.user_stakes.write(user, stake_info);
+
+            let locked_stake = StakeInfo {
+                amount: stake_info.amount,
+                stake_time: stake_info.stake_time,
+                unlock_time: stake_info.unlock_time,
+                is_locked: true,
+            };
+            self.user_stakes.write(user, locked_stake);
             
             // Update reputation severely
             let mut profile = self.user_profiles.read(user);
@@ -1934,6 +1958,26 @@ mod GurftronDB {
                 creator: doc.creator,
                 timestamp: get_block_timestamp()
             });
+        }
+
+        /// @notice Cleans up documents pending validation beyond max_pending_time
+        /// @dev Admin-only function to reject stale pending documents
+        fn cleanup_stale_pending_documents(ref self: ContractState) {
+            self.only_admin();
+            let total_pending = self.pending_validations_count.read();
+            let max_pending_time = self.max_pending_time.read();
+            let current_time = get_block_timestamp();
+            
+            let mut i = 0_u64;
+            while i < total_pending {
+                let (collection, doc_id) = self.pending_validation_ids.read(i);
+                let doc = self.documents.read((collection, doc_id));
+                
+                if doc.validation_status == 'pending' && (current_time - doc.created_at) > max_pending_time {
+                    self._reject_document(collection, doc_id);
+                }
+                i += 1;
+            }
         }
     }
 
@@ -2545,26 +2589,6 @@ mod GurftronDB {
                     total_votes: doc.whitelist_total_voters,
                     timestamp: get_block_timestamp()
                 });
-            }
-        }
-
-        /// @notice Cleans up documents pending validation beyond max_pending_time
-        /// @dev Admin-only function to reject stale pending documents
-        fn cleanup_stale_pending_documents(ref self: ContractState) {
-            self.only_admin();
-            let total_pending = self.pending_validations_count.read();
-            let max_pending_time = self.max_pending_time.read();
-            let current_time = get_block_timestamp();
-            
-            let mut i = 0_u64;
-            while i < total_pending {
-                let (collection, doc_id) = self.pending_validation_ids.read(i);
-                let doc = self.documents.read((collection, doc_id));
-                
-                if doc.validation_status == 'pending' && (current_time - doc.created_at) > max_pending_time {
-                    self._reject_document(collection, doc_id);
-                }
-                i += 1;
             }
         }
         
