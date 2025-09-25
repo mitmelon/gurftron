@@ -1793,7 +1793,7 @@ mod GurftronDB {
 
     impl InternalImpl of InternalTrait {
         fn _compute_data_hash(self: @ContractState, data: @ByteArray) -> felt252 {
-           pedersen(data.len().into(), data.at(0).unwrap_or(0).into())
+           pedersen(data.len().into(), if data.len() > 0 { data.at(0).unwrap().into() } else { 0 })
         }
 
         fn enforce_cooldown(ref self: ContractState, action_type: felt252) {
@@ -2237,8 +2237,8 @@ mod GurftronDB {
 
         fn _cleanup_document(ref self: ContractState, collection: felt252, id: felt252) {
             let empty_doc = Document {
-                compressed_data: Default::default(),
-                creator: ContractAddress::default(),
+                compressed_data: Default::zero(),
+                creator: ContractAddress::zero(),
                 created_at: 0,
                 updated_at: 0,
                 data_hash: 0,
@@ -2252,7 +2252,7 @@ mod GurftronDB {
                 whitelist_approved_for_deletion: false,
             };
             self.documents.entry((collection, id)).write(empty_doc);
-            self.creators.entry((collection, id)).write(ContractAddress::default());
+            self.creators.entry((collection, id)).write(ContractAddress::zero());
             self.field_lengths.entry((collection, id)).write(0);
             let num = self.num_docs.entry(collection).read();
             let mut index: u32 = 0;
