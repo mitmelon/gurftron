@@ -103,28 +103,6 @@ trait IDatabase<TContractState> {
     fn cleanup_stale_pending_documents(ref self: TContractState);
 }
 
-trait InternalTrait<ContractState> {
-    fn _charge_query_points(ref self: ContractState, account: ContractAddress);
-    fn _charge_update_points(ref self: ContractState, account: ContractAddress);
-    fn _charge_delete_points(ref self: ContractState, account: ContractAddress);
-    fn _decrease_size_statistics(ref self: ContractState, size: u256);
-    fn _approve_document(ref self: ContractState, collection: felt252, doc_id: felt252);
-    fn _reject_document(ref self: ContractState, collection: felt252, doc_id: felt252);
-    fn _remove_from_pending_validations(ref self: ContractState, collection: felt252, doc_id: felt252);
-    fn _award_approval_points_and_badge(ref self: ContractState, creator: ContractAddress, collection: felt252, document_id: felt252);
-    fn _check_validation_consensus(ref self: ContractState, collection: felt252, doc_id: felt252);
-    fn _check_whitelist_consensus(ref self: ContractState, collection: felt252, doc_id: felt252);
-    fn _remove_from_all_indices(ref self: ContractState, collection: felt252, id: felt252);
-    fn _remove_from_index(ref self: ContractState, collection: felt252, field: felt252, value: felt252, id: felt252);
-    fn _cleanup_document(ref self: ContractState, collection: felt252, id: felt252);
-    fn _increment_account_statistics(ref self: ContractState);
-    fn _update_insert_statistics(ref self: ContractState, data: @ByteArray);
-    fn _update_size_statistics(ref self: ContractState, old_size: u256, new_size: u256);
-    fn _store_fields(ref self: ContractState, collection: felt252, id: felt252, fields: @Array<(felt252, felt252)>);
-    fn enforce_cooldown(ref self: ContractState, action_type: felt252);
-    fn enforce_rate_limit(ref self: ContractState, action_type: felt252, max_per_hour: u32);
-}
-
 /// @title Enhanced Event Definitions with Specific Names
 /// @notice All events emitted by the contract for tracking operations and rewards
 
@@ -534,7 +512,7 @@ struct SecurityParametersUpdated {
 }
 
 /// @title Enhanced Storage Structures
-#[derive(Drop, Serde, starknet::Store)]
+#[derive(Drop, starknet::Store)]
 struct Document {
     compressed_data: ByteArray,
     creator: ContractAddress,
@@ -551,7 +529,7 @@ struct Document {
     whitelist_approved_for_deletion: bool,
 }
 
-#[derive(Copy, Drop, Serde, starknet::Store)]
+#[derive(Drop, starknet::Store)]
 struct StakeInfo {
     amount: u256,
     stake_time: u64,
@@ -559,7 +537,7 @@ struct StakeInfo {
     is_locked: bool,
 }
 
-#[derive(Copy, Drop, Serde, starknet::Store)]
+#[derive(Drop, starknet::Store)]
 struct UserProfile {
     reputation_score: i32,
     total_documents: u32,
@@ -570,7 +548,7 @@ struct UserProfile {
     approved_documents: u32, // Count of approved documents
 }
 
-#[derive(Copy, Drop, Serde, starknet::Store)]
+#[derive(Drop, starknet::Store)]
 struct MaliciousReport {
     reporter: ContractAddress,
     collection: felt252,
@@ -609,6 +587,57 @@ mod GurftronDB {
     use core::pedersen::pedersen;
     use core::poseidon::PoseidonTrait;
     use core::hash::{HashStateTrait, HashStateExTrait};
+
+    trait ModifierTrait {
+        fn only_moderator_or_admin(self: @ContractState);
+        fn only_admin(self: @ContractState);
+        fn only_registered_non_banned(self: @ContractState);
+        fn only_staked_users(self: @ContractState);
+        fn check_reputation(self: @ContractState);
+        fn can_read(self: @ContractState);
+        fn validate_fields(self: @ContractState, fields: @Array<(felt252, felt252)>);
+        fn validate_query(self: @ContractState, query: @Array<(felt252, felt252, felt252, felt252)>);
+        fn validate_data(self: @ContractState, data: @ByteArray);
+    }
+
+    trait InternalTrait {
+        // Read-only helpers
+        fn _compute_data_hash(self: @ContractState, data: @ByteArray) -> felt252;
+        fn _calculate_data_size(self: @ContractState, data: @ByteArray) -> u256;
+        fn _get_document_fields(self: @ContractState, collection: felt252, id: felt252) -> Array<(felt252, felt252)>;
+        fn _is_indexed(self: @ContractState, collection: felt252, field: felt252, num_indexed: u32) -> bool;
+        fn _matches_condition(self: @ContractState, collection: felt252, id: felt252, field: felt252, op: felt252, value: felt252) -> bool;
+        fn _matches_query(self: @ContractState, collection: felt252, id: felt252, query: @Array<(felt252, felt252, felt252, felt252)>) -> bool;
+        fn _get_all_document_ids(self: @ContractState, collection: felt252) -> Array<felt252>;
+        fn _get_indexed_documents(self: @ContractState, collection: felt252, field: felt252, value: felt252) -> Array<felt252>;
+        fn _scan_documents(self: @ContractState, collection: felt252, query: @Array<(felt252, felt252, felt252, felt252)>) -> Array<felt252>;
+        fn _process_query(self: @ContractState, collection: felt252, query: @Array<(felt252, felt252, felt252, felt252)>) -> Array<felt252>;
+        fn _get_all_approved_document_ids(self: @ContractState, collection: felt252) -> Array<felt252>;
+        fn _process_approved_query(self: @ContractState, collection: felt252, query: @Array<(felt252, felt252, felt252, felt252)>) -> Array<felt252>;
+        fn _paginate_results(self: @ContractState, candidates: @Array<felt252>, page: u32) -> Array<felt252>;
+
+        // Mutating helpers (MUST use `ref self`)
+        fn _check_validation_consensus(ref self: ContractState, collection: felt252, doc_id: felt252);
+        fn _approve_document(ref self: ContractState, collection: felt252, doc_id: felt252);
+        fn _reject_document(ref self: ContractState, collection: felt252, doc_id: felt252);
+        fn _remove_from_pending_validations(ref self: ContractState, collection: felt252, doc_id: felt252);
+        fn _award_approval_points_and_badge(ref self: ContractState, creator: ContractAddress, collection: felt252, document_id: felt252);
+        fn _charge_query_points(ref self: ContractState, account: ContractAddress);
+        fn _charge_update_points(ref self: ContractState, account: ContractAddress);
+        fn _charge_delete_points(ref self: ContractState, account: ContractAddress);
+        fn _check_whitelist_consensus(ref self: ContractState, collection: felt252, doc_id: felt252);
+        fn _remove_from_all_indices(ref self: ContractState, collection: felt252, id: felt252);
+        fn _remove_from_index(ref self: ContractState, collection: felt252, field: felt252, value: felt252, id: felt252);
+        fn _cleanup_document(ref self: ContractState, collection: felt252, id: felt252);
+        fn _increment_account_statistics(ref self: ContractState);
+        fn _update_insert_statistics(ref self: ContractState, data: @ByteArray);
+        fn _update_size_statistics(ref self: ContractState, old_size: u256, new_size: u256);
+        fn _decrease_size_statistics(ref self: ContractState, size: u256);
+        fn _store_fields(ref self: ContractState, collection: felt252, id: felt252, fields: @Array<(felt252, felt252)>);
+        fn cleanup_stale_pending_documents(ref self: ContractState);
+        fn enforce_cooldown(ref self: ContractState, action_type: felt252);
+        fn enforce_rate_limit(ref self: ContractState, action_type: felt252, max_per_hour: u32);
+    }
 
 
     // ============================================================================
@@ -843,7 +872,6 @@ mod GurftronDB {
     // ENHANCED SECURITY MODIFIERS
     // ============================================================================
 
-    #[generate_trait]
     impl ModifierImpl of ModifierTrait {
         /// @notice Ensures caller is admin or moderator
         fn only_moderator_or_admin(self: @ContractState) {
@@ -2231,7 +2259,7 @@ mod GurftronDB {
     // ============================================================================
     // INTERNAL HELPER FUNCTIONS (Enhanced)
     // ============================================================================
-    impl InternalImpl of InternalTrait<ContractState> {
+    impl InternalImpl of InternalTrait {
         /// @notice Computes hash of data for integrity verification
         fn _compute_data_hash(self: @ContractState, data: @ByteArray) -> felt252 {
             let mut hash_state = PoseidonTrait::new();
