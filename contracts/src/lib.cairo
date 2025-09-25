@@ -8,7 +8,6 @@ use core::clone::Clone;
 use core::pedersen::pedersen;
 use core::poseidon::PoseidonTrait;
 use core::hash::{HashStateTrait, HashStateExTrait};
-use core::num::traits::Zero;
 
 
 /// @title IERC20 Interface for STRK token interactions
@@ -102,28 +101,6 @@ trait IDatabase<TContractState> {
     fn force_reject_document(ref self: TContractState, collection: felt252, doc_id: felt252);
     fn delete_whitelisted_document(ref self: TContractState, collection: felt252, doc_id: felt252);
     fn cleanup_stale_pending_documents(ref self: TContractState);
-}
-
-trait InternalTrait<ContractState> {
-    fn _charge_query_points(ref self: ContractState, account: ContractAddress);
-    fn _charge_update_points(ref self: ContractState, account: ContractAddress);
-    fn _charge_delete_points(ref self: ContractState, account: ContractAddress);
-    fn _decrease_size_statistics(ref self: ContractState, size: u256);
-    fn _approve_document(ref self: ContractState, collection: felt252, doc_id: felt252);
-    fn _reject_document(ref self: ContractState, collection: felt252, doc_id: felt252);
-    fn _remove_from_pending_validations(ref self: ContractState, collection: felt252, doc_id: felt252);
-    fn _award_approval_points_and_badge(ref self: ContractState, creator: ContractAddress, collection: felt252, document_id: felt252);
-    fn _check_validation_consensus(ref self: ContractState, collection: felt252, doc_id: felt252);
-    fn _check_whitelist_consensus(ref self: ContractState, collection: felt252, doc_id: felt252);
-    fn _remove_from_all_indices(ref self: ContractState, collection: felt252, id: felt252);
-    fn _remove_from_index(ref self: ContractState, collection: felt252, field: felt252, value: felt252, id: felt252);
-    fn _cleanup_document(ref self: ContractState, collection: felt252, id: felt252);
-    fn _increment_account_statistics(ref self: ContractState);
-    fn _update_insert_statistics(ref self: ContractState, data: @ByteArray);
-    fn _update_size_statistics(ref self: ContractState, old_size: u256, new_size: u256);
-    fn _store_fields(ref self: ContractState, collection: felt252, id: felt252, fields: @Array<(felt252, felt252)>);
-    fn enforce_cooldown(ref self: ContractState, action_type: felt252);
-    fn enforce_rate_limit(ref self: ContractState, action_type: felt252, max_per_hour: u32);
 }
 
 /// @title Enhanced Event Definitions with Specific Names
@@ -601,7 +578,17 @@ mod GurftronDB {
         // Storage structures
         Document, StakeInfo, UserProfile, MaliciousReport
     };
-   
+    use core::num::traits::Zero;
+    use starknet::storage::{Map, StoragePointerReadAccess, StoragePointerWriteAccess};
+    use core::array::{ArrayTrait, SpanTrait};
+    use core::byte_array::ByteArrayTrait;
+    use core::option::OptionTrait;
+    use core::traits::{TryInto, Into};
+    use core::pedersen::pedersen;
+    use core::poseidon::PoseidonTrait;
+    use core::hash::{HashStateTrait, HashStateExTrait};
+
+
     // ============================================================================
     // ENHANCED CONSTANTS
     // ============================================================================
