@@ -46,9 +46,9 @@ trait IDatabase<TContractState> {
     // Collection Management
     fn create_collection(ref self: TContractState, name: felt252, indexed_fields: Array<felt252>);
     // Document Operations with Enhanced Security
-    fn insert(ref self: TContractState, collection: felt252, compressed_data: ByteArray, fields: Array<(felt252, felt252)>) -> felt252;
+    fn insert(ref self: TContractState, collection: felt252, compressed_ ByteArray, fields: Array<(felt252, felt252)>) -> felt252;
     fn get(self: @TContractState, collection: felt252, id: felt252) -> (ByteArray, Array<(felt252, felt252)>);
-    fn update(ref self: TContractState, collection: felt252, id: felt252, compressed_data: ByteArray, fields: Array<(felt252, felt252)>);
+    fn update(ref self: TContractState, collection: felt252, id: felt252, compressed_ ByteArray, fields: Array<(felt252, felt252)>);
     fn delete(ref self: TContractState, collection: felt252, id: felt252);
     // Query Operations (Enhanced to filter approved data)
     fn find(self: @TContractState, collection: felt252, query: Array<(felt252, felt252, felt252, felt252)>, page: u32) -> Array<felt252>;
@@ -477,7 +477,7 @@ struct SecurityParametersUpdated {
 /// @title Enhanced Storage Structures
 #[derive(Drop, starknet::Store)]
 struct Document {
-    compressed_data: ByteArray,
+    compressed_ ByteArray,
     creator: ContractAddress,
     created_at: u64,
     updated_at: u64,
@@ -541,21 +541,100 @@ mod GurftronDB {
         // Storage structures
         Document, StakeInfo, UserProfile, MaliciousReport
     };
-    use core::starknet::storage::{StorageMapReadAccess, StorageMapWriteAccess};
-    use core::starknet::storage::{StorageReadAccess, StorageWriteAccess};
-    use core::starknet::storage::{StorageMapEntryReadAccess, StorageMapEntryWriteAccess};
-    use core::starknet::storage::{StorageNodeReadAccess, StorageNodeWriteAccess};
-    use core::starknet::storage::{StorageNodeEntryReadAccess, StorageNodeEntryWriteAccess};
-    use core::starknet::storage::{StorageBase, StoragePath, StoragePointer};
-    use core::starknet::storage::{StorageAccess};
-    use core::starknet::storage::{StorageEntry};
-    use core::starknet::storage::{StorageNodeAccess};
-    use core::starknet::storage::{StorageMapAccess};
-    use core::starknet::storage::{StorageNodeEntryAccess};
+    use starknet::storage::{Map, StorageNodeReadAccess, StorageNodeWriteAccess};
     use core::num::traits::Zero;
     use core::poseidon::PoseidonHash;
-    
-    // Define Storage Nodes for complex Map types
+    use core::felt252;
+    use core::array::ArrayTrait;
+
+    trait ModifierTrait {
+        fn only_moderator_or_admin(self: @ContractState);
+        fn only_admin(self: @ContractState);
+        fn only_registered_non_banned(self: @ContractState);
+        fn only_staked_users(self: @ContractState);
+        fn check_reputation(self: @ContractState);
+        fn can_read(self: @ContractState);
+        fn validate_fields(self: @ContractState, fields: @Array<(felt252, felt252)>);
+        fn validate_query(self: @ContractState, query: @Array<(felt252, felt252, felt252, felt252)>);
+        fn validate_data(self: @ContractState, data: @ByteArray);
+    }
+
+    trait InternalTrait {
+        // Read-only helpers
+        fn _compute_data_hash(self: @ContractState,  @ByteArray) -> felt252;
+        fn _calculate_data_size(self: @ContractState,  @ByteArray) -> u256;
+        fn _get_document_fields(self: @ContractState, collection: felt252, id: felt252) -> Array<(felt252, felt252)>;
+        fn _is_indexed(self: @ContractState, collection: felt252, field: felt252, num_indexed: u32) -> bool;
+        fn _matches_condition(self: @ContractState, collection: felt252, id: felt252, field: felt252, op: felt252, value: felt252) -> bool;
+        fn _matches_query(self: @ContractState, collection: felt252, id: felt252, query: @Array<(felt252, felt252, felt252, felt252)>) -> bool;
+        fn _get_all_document_ids(self: @ContractState, collection: felt252) -> Array<felt252>;
+        fn _get_indexed_documents(self: @ContractState, collection: felt252, field: felt252, value: felt252) -> Array<felt252>;
+        fn _scan_documents(self: @ContractState, collection: felt252, query: @Array<(felt252, felt252, felt252, felt252)>) -> Array<felt252>;
+        fn _process_query(self: @ContractState, collection: felt252, query: @Array<(felt252, felt252, felt252, felt252)>) -> Array<felt252>;
+        fn _get_all_approved_document_ids(self: @ContractState, collection: felt252) -> Array<felt252>;
+        fn _process_approved_query(self: @ContractState, collection: felt252, query: @Array<(felt252, felt252, felt252, felt252)>) -> Array<felt252>;
+        fn _paginate_results(self: @ContractState, candidates: @Array<felt252>, page: u32) -> Array<felt252>;
+        // Mutating helpers (MUST use `ref self`)
+        fn _check_validation_consensus(ref self: ContractState, collection: felt252, doc_id: felt252);
+        fn _approve_document(ref self: ContractState, collection: felt252, doc_id: felt252);
+        fn _reject_document(ref self: ContractState, collection: felt252, doc_id: felt252);
+        fn _remove_from_pending_validations(ref self: ContractState, collection: felt252, doc_id: felt252);
+        fn _award_approval_points_and_badge(ref self: ContractState, creator: ContractAddress, collection: felt252, document_id: felt252);
+        fn _charge_query_points(ref self: ContractState, account: ContractAddress);
+        fn _charge_update_points(ref self: ContractState, account: ContractAddress);
+        fn _charge_delete_points(ref self: ContractState, account: ContractAddress);
+        fn _check_whitelist_consensus(ref self: ContractState, collection: felt252, doc_id: felt252);
+        fn _remove_from_all_indices(ref self: ContractState, collection: felt252, id: felt252);
+        fn _remove_from_index(ref self: ContractState, collection: felt252, field: felt252, value: felt252, id: felt252);
+        fn _cleanup_document(ref self: ContractState, collection: felt252, id: felt252);
+        fn _increment_account_statistics(ref self: ContractState);
+        fn _update_insert_statistics(ref self: ContractState,  @ByteArray);
+        fn _update_size_statistics(ref self: ContractState, old_size: u256, new_size: u256);
+        fn _decrease_size_statistics(ref self: ContractState, size: u256);
+        fn _store_fields(ref self: ContractState, collection: felt252, id: felt252, fields: @Array<(felt252, felt252)>);
+        fn enforce_cooldown(ref self: ContractState, action_type: felt252);
+        fn enforce_rate_limit(ref self: ContractState, action_type: felt252, max_per_hour: u32);
+    }
+
+    // ============================================================================
+    // ENHANCED CONSTANTS
+    // ============================================================================
+    /// @notice Default reward parameters - configurable by admin
+    const DEFAULT_POINTS_PER_INSERT: u32 = 10;
+    const DEFAULT_POINTS_PER_UPDATE: u32 = 1000;
+    const DEFAULT_POINTS_PER_DELETE: u32 = 1000;
+    const DEFAULT_POINTS_PER_QUERY_PAGE: u32 = 1000;
+    const DEFAULT_POINTS_THRESHOLD_FOR_CLAIM: u32 = 1000;
+    const DEFAULT_PREMIUM_REWARD_MULTIPLIER: u32 = 2;
+    const DEFAULT_BADGE_THRESHOLD: u32 = 1000;
+    const DEFAULT_POINTS_TO_STRK_WEI: u256 = 10000000000000000; // 0.01 STRK per point
+    /// @notice Security and staking constants
+    const MINIMUM_STAKE_AMOUNT: u256 = 10_000_000_000_000_000_000; // 10 STRK
+    const STAKE_LOCK_PERIOD: u64 = 2592000; // 30 days in seconds
+    const ACTION_COOLDOWN_PERIOD: u64 = 300; // 5 minutes between actions
+    const MINIMUM_REPUTATION_SCORE: i32 = -100;
+    const APPROVAL_PERCENTAGE: u32 = 60; // 60% positive votes needed for approval
+    const VOTE_REWARD_POINTS: u32 = 2; // Points for voting
+    const MAX_PENDING_TIME: u64 = 604800; // 7 days in seconds
+    /// @notice Rate limiting constants
+    const MAX_INSERTS_PER_HOUR: u32 = 10;
+    const MAX_UPDATES_PER_HOUR: u32 = 20;
+    const MAX_QUERIES_PER_HOUR: u32 = 100;
+    const MAX_VOTES_PER_HOUR: u32 = 50;
+    /// @notice Data validation constants
+    const MAXIMUM_DATA_SIZE: u32 = 1048576; // 1MB
+    const MAXIMUM_DOCUMENTS_PER_USER: u32 = 1000;
+    const MAXIMUM_FIELD_LENGTH: u32 = 100;
+    const MAX_QUERY_CONDITIONS: u32 = 50;
+    const SLASH_PERCENTAGE: u32 = 50; // 50% of stake slashed for malicious activity
+    /// @notice Query and fee constants
+    const QUERY_PAGE_SIZE: u32 = 1000;
+    const TRANSACTION_FEE_PERCENT: u32 = 10;
+    const MAX_INDEXED_FIELDS: u32 = 10;
+
+    // ============================================================================
+    // STORAGE NODES
+    // ============================================================================
     #[starknet::storage_node]
     struct UserNode {
         points: Map<ContractAddress, i32>,
@@ -642,91 +721,6 @@ mod GurftronDB {
         total_malicious_reports: u64,
         total_resolved_reports: u64,
     }
-
-    trait ModifierTrait {
-        fn only_moderator_or_admin(self: @ContractState);
-        fn only_admin(self: @ContractState);
-        fn only_registered_non_banned(self: @ContractState);
-        fn only_staked_users(self: @ContractState);
-        fn check_reputation(self: @ContractState);
-        fn can_read(self: @ContractState);
-        fn validate_fields(self: @ContractState, fields: @Array<(felt252, felt252)>);
-        fn validate_query(self: @ContractState, query: @Array<(felt252, felt252, felt252, felt252)>);
-        fn validate_data(self: @ContractState, data: @ByteArray);
-    }
-
-    trait InternalTrait {
-        // Read-only helpers
-        fn _compute_data_hash(self: @ContractState, data: @ByteArray) -> felt252;
-        fn _calculate_data_size(self: @ContractState, data: @ByteArray) -> u256;
-        fn _get_document_fields(self: @ContractState, collection: felt252, id: felt252) -> Array<(felt252, felt252)>;
-        fn _is_indexed(self: @ContractState, collection: felt252, field: felt252, num_indexed: u32) -> bool;
-        fn _matches_condition(self: @ContractState, collection: felt252, id: felt252, field: felt252, op: felt252, value: felt252) -> bool;
-        fn _matches_query(self: @ContractState, collection: felt252, id: felt252, query: @Array<(felt252, felt252, felt252, felt252)>) -> bool;
-        fn _get_all_document_ids(self: @ContractState, collection: felt252) -> Array<felt252>;
-        fn _get_indexed_documents(self: @ContractState, collection: felt252, field: felt252, value: felt252) -> Array<felt252>;
-        fn _scan_documents(self: @ContractState, collection: felt252, query: @Array<(felt252, felt252, felt252, felt252)>) -> Array<felt252>;
-        fn _process_query(self: @ContractState, collection: felt252, query: @Array<(felt252, felt252, felt252, felt252)>) -> Array<felt252>;
-        fn _get_all_approved_document_ids(self: @ContractState, collection: felt252) -> Array<felt252>;
-        fn _process_approved_query(self: @ContractState, collection: felt252, query: @Array<(felt252, felt252, felt252, felt252)>) -> Array<felt252>;
-        fn _paginate_results(self: @ContractState, candidates: @Array<felt252>, page: u32) -> Array<felt252>;
-        // Mutating helpers (MUST use `ref self`)
-        fn _check_validation_consensus(ref self: ContractState, collection: felt252, doc_id: felt252);
-        fn _approve_document(ref self: ContractState, collection: felt252, doc_id: felt252);
-        fn _reject_document(ref self: ContractState, collection: felt252, doc_id: felt252);
-        fn _remove_from_pending_validations(ref self: ContractState, collection: felt252, doc_id: felt252);
-        fn _award_approval_points_and_badge(ref self: ContractState, creator: ContractAddress, collection: felt252, document_id: felt252);
-        fn _charge_query_points(ref self: ContractState, account: ContractAddress);
-        fn _charge_update_points(ref self: ContractState, account: ContractAddress);
-        fn _charge_delete_points(ref self: ContractState, account: ContractAddress);
-        fn _check_whitelist_consensus(ref self: ContractState, collection: felt252, doc_id: felt252);
-        fn _remove_from_all_indices(ref self: ContractState, collection: felt252, id: felt252);
-        fn _remove_from_index(ref self: ContractState, collection: felt252, field: felt252, value: felt252, id: felt252);
-        fn _cleanup_document(ref self: ContractState, collection: felt252, id: felt252);
-        fn _increment_account_statistics(ref self: ContractState);
-        fn _update_insert_statistics(ref self: ContractState, data: @ByteArray);
-        fn _update_size_statistics(ref self: ContractState, old_size: u256, new_size: u256);
-        fn _decrease_size_statistics(ref self: ContractState, size_to_remove: u256);
-        fn _store_fields(ref self: ContractState, collection: felt252, id: felt252, fields: @Array<(felt252, felt252)>);
-        fn enforce_cooldown(ref self: ContractState, action_type: felt252);
-        fn enforce_rate_limit(ref self: ContractState, action_type: felt252, max_per_hour: u32);
-    }
-
-    // ============================================================================
-    // ENHANCED CONSTANTS
-    // ============================================================================
-    /// @notice Default reward parameters - configurable by admin
-    const DEFAULT_POINTS_PER_INSERT: u32 = 10;
-    const DEFAULT_POINTS_PER_UPDATE: u32 = 1000;
-    const DEFAULT_POINTS_PER_DELETE: u32 = 1000;
-    const DEFAULT_POINTS_PER_QUERY_PAGE: u32 = 1000;
-    const DEFAULT_POINTS_THRESHOLD_FOR_CLAIM: u32 = 1000;
-    const DEFAULT_PREMIUM_REWARD_MULTIPLIER: u32 = 2;
-    const DEFAULT_BADGE_THRESHOLD: u32 = 1000;
-    const DEFAULT_POINTS_TO_STRK_WEI: u256 = 10000000000000000; // 0.01 STRK per point
-    /// @notice Security and staking constants
-    const MINIMUM_STAKE_AMOUNT: u256 = 10_000_000_000_000_000_000; // 10 STRK
-    const STAKE_LOCK_PERIOD: u64 = 2592000; // 30 days in seconds
-    const ACTION_COOLDOWN_PERIOD: u64 = 300; // 5 minutes between actions
-    const MINIMUM_REPUTATION_SCORE: i32 = -100;
-    const APPROVAL_PERCENTAGE: u32 = 60; // 60% positive votes needed for approval
-    const VOTE_REWARD_POINTS: u32 = 2; // Points for voting
-    const MAX_PENDING_TIME: u64 = 604800; // 7 days in seconds
-    /// @notice Rate limiting constants
-    const MAX_INSERTS_PER_HOUR: u32 = 10;
-    const MAX_UPDATES_PER_HOUR: u32 = 20;
-    const MAX_QUERIES_PER_HOUR: u32 = 100;
-    const MAX_VOTES_PER_HOUR: u32 = 50;
-    /// @notice Data validation constants
-    const MAXIMUM_DATA_SIZE: u32 = 1048576; // 1MB
-    const MAXIMUM_DOCUMENTS_PER_USER: u32 = 1000;
-    const MAXIMUM_FIELD_LENGTH: u32 = 100;
-    const MAX_QUERY_CONDITIONS: u32 = 50;
-    const SLASH_PERCENTAGE: u32 = 50; // 50% of stake slashed for malicious activity
-    /// @notice Query and fee constants
-    const QUERY_PAGE_SIZE: u32 = 1000;
-    const TRANSACTION_FEE_PERCENT: u32 = 10;
-    const MAX_INDEXED_FIELDS: u32 = 10;
 
     // ============================================================================
     // ENHANCED STORAGE
@@ -845,7 +839,7 @@ mod GurftronDB {
         fn only_moderator_or_admin(self: @ContractState) {
             let caller = get_caller_address();
             let admin_addr = self.config.admin_address.read();
-            assert(caller == admin_addr || self.config.moderators.entry(caller).read(), 'Not admin or moderator');
+            assert(caller == admin_addr || self.config.moderators.read(caller), 'Not admin or moderator');
         }
         /// @notice Ensures caller is admin
         fn only_admin(self: @ContractState) {
@@ -856,14 +850,14 @@ mod GurftronDB {
         /// @notice Ensures user is registered and not banned
         fn only_registered_non_banned(self: @ContractState) {
             let caller = get_caller_address();
-            assert(self.user.accounts.entry(caller).read() != 0, 'Account not registered');
-            assert(!self.user.banned_users.entry(caller).read(), 'User is banned');
+            assert(self.config.accounts.read(caller) != 0, 'Account not registered');
+            assert(!self.config.banned_users.read(caller), 'User is banned');
             assert(!self.config.is_circuit_breaker_active.read(), 'System maintenance mode');
         }
         /// @notice Ensures user has sufficient stake
         fn only_staked_users(self: @ContractState) {
             let caller = get_caller_address();
-            let stake_info = self.user.user_stakes.entry(caller).read();
+            let stake_info = self.config.user_stakes.read(caller);
             let min_stake = self.config.minimum_stake_amount.read();
             assert(stake_info.amount >= min_stake, 'Insufficient stake amount');
             assert(!stake_info.is_locked, 'Stake is locked');
@@ -871,16 +865,16 @@ mod GurftronDB {
         /// @notice Ensures user has sufficient reputation
         fn check_reputation(self: @ContractState) {
             let caller = get_caller_address();
-            let profile = self.user.user_profiles.entry(caller).read();
+            let profile = self.config.user_profiles.read(caller);
             let min_rep = self.config.minimum_reputation_score.read();
             assert(profile.reputation_score >= min_rep, 'Reputation too low');
         }
         /// @notice Ensures user can perform read operations
         fn can_read(self: @ContractState) {
             let caller = get_caller_address();
-            let is_premium = self.user.is_user_premium.entry(caller).read();
-            let points = self.user.points.entry(caller).read();
-            assert(!self.user.banned_users.entry(caller).read(), 'User is banned');
+            let is_premium = self.config.is_user_premium.read(caller);
+            let points = self.config.points.read(caller);
+            assert(!self.config.banned_users.read(caller), 'User is banned');
             assert(is_premium || points >= 0, 'Negative balance - upgrade to premium');
         }
         /// @notice Validates field array length
@@ -892,7 +886,7 @@ mod GurftronDB {
             assert(query.len() <= MAX_QUERY_CONDITIONS, 'Too many query conditions');
         }
         /// @notice Validates data integrity and size
-        fn validate_data(self: @ContractState, data: @ByteArray) {
+        fn validate_data(self: @ContractState,  @ByteArray) {
             assert(data.len() > 0, 'Data cannot be empty');
             assert(data.len() <= MAXIMUM_DATA_SIZE, 'Data size exceeds limit');
         }
@@ -922,7 +916,7 @@ mod GurftronDB {
         self.only_admin();
         assert(!user_address.is_zero(), 'Invalid user address');
         let caller = get_caller_address();
-        self.user.is_user_premium.entry(user_address).write(is_premium);
+        self.config.is_user_premium.write(user_address, is_premium);
         self.emit(PremiumStatusSet { account: user_address, is_premium, admin: caller, timestamp: get_block_timestamp() });
     }
     /// @notice Emergency circuit breaker to pause system (Admin only)
@@ -951,14 +945,14 @@ mod GurftronDB {
         fn add_moderator(ref self: ContractState, moderator: ContractAddress) {
             self.only_admin();
             assert(!moderator.is_zero(), 'Invalid moderator address');
-            self.config.moderators.entry(moderator).write(true);
+            self.config.moderators.write(moderator, true);
         }
         /// @notice Removes a moderator (Admin only)
         /// @param moderator Address to remove moderator role
         fn remove_moderator(ref self: ContractState, moderator: ContractAddress) {
             self.only_admin();
             assert(!moderator.is_zero(), 'Invalid moderator address');
-            self.config.moderators.entry(moderator).write(false);
+            self.config.moderators.write(moderator, false);
         }
         /// @notice Stakes STRK tokens for database access
         /// @param amount Amount of STRK to stake (minimum 10 STRK)
@@ -974,7 +968,7 @@ mod GurftronDB {
             let current_time = get_block_timestamp();
             let lock_period = self.config.stake_lock_period.read();
             // Update or create stake info
-            let existing_stake = self.user.user_stakes.entry(caller).read();
+            let existing_stake = self.config.user_stakes.read(caller);
             let total_stake = existing_stake.amount + amount;
             let stake_info = StakeInfo {
                 amount: total_stake,
@@ -982,7 +976,7 @@ mod GurftronDB {
                 unlock_time: current_time + lock_period,
                 is_locked: false,
             };
-            self.user.user_stakes.entry(caller).write(stake_info);
+            self.config.user_stakes.write(caller, stake_info);
             self.emit(StakeDepositedEvent { 
                 staker: caller, 
                 amount: total_stake, 
@@ -993,14 +987,14 @@ mod GurftronDB {
         /// @notice Withdraws staked STRK tokens after lock period
         fn withdraw_stake(ref self: ContractState) {
             let caller = get_caller_address();
-            let stake_info = self.user.user_stakes.entry(caller).read();
+            let stake_info = self.config.user_stakes.read(caller);
             let current_time = get_block_timestamp();
             assert(stake_info.amount > 0, 'No stake to withdraw');
             assert(current_time >= stake_info.unlock_time, 'Stake still locked');
             assert(!stake_info.is_locked, 'Stake locked due to disputes');
             let amount = stake_info.amount;
             // Clear stake info
-            self.user.user_stakes.entry(caller).write(StakeInfo {
+            self.config.user_stakes.write(caller, StakeInfo {
                 amount: 0,
                 stake_time: 0,
                 unlock_time: 0,
@@ -1020,21 +1014,21 @@ mod GurftronDB {
         /// @param user Address to check
         /// @return (amount, unlock_time, is_locked) Stake details
         fn get_stake_info(self: @ContractState, user: ContractAddress) -> (u256, u64, bool) {
-            let stake_info = self.user.user_stakes.entry(user).read();
+            let stake_info = self.config.user_stakes.read(user);
             (stake_info.amount, stake_info.unlock_time, stake_info.is_locked)
         }
         /// @notice Emergency unlock stake for a user (Admin only)
         /// @param user User to unlock stake for
         fn emergency_unlock_stake(ref self: ContractState, user: ContractAddress) {
             self.only_admin();
-            let mut stake_info = self.user.user_stakes.entry(user).read();
+            let mut stake_info = self.config.user_stakes.read(user);
             let updated_stake = StakeInfo {
                 amount: stake_info.amount,
                 stake_time: stake_info.stake_time, 
                 unlock_time: stake_info.unlock_time,
                 is_locked: false,
             };
-            self.user.user_stakes.entry(user).write(updated_stake);
+            self.config.user_stakes.write(user, updated_stake);
         }
         /// @notice Creates a new collection with specified indexed fields
         /// @param name Collection name
@@ -1049,12 +1043,12 @@ mod GurftronDB {
             let caller = get_caller_address();
             let len: u32 = indexed_fields.len();
             // Store indexed fields
-            self.indexing.num_indexed.entry(name).write(len);
+            self.config.num_indexed.write(name, len);
             let mut i: u32 = 0;
             while i < len {
                 let field = *indexed_fields.at(i);
                 assert(field != 0, 'Field name cannot be empty');
-                self.indexing.indexed_fields.entry((name, i)).write(field);
+                self.config.indexed_fields.write((name, i), field);
                 i += 1;
             }
             self.emit(CollectionCreatedEvent { 
@@ -1072,7 +1066,7 @@ mod GurftronDB {
         fn insert(
             ref self: ContractState, 
             collection: felt252, 
-            compressed_data: ByteArray, 
+            compressed_ ByteArray, 
             fields: Array<(felt252, felt252)>
         ) -> felt252 {
             self.only_registered_non_banned();
@@ -1086,20 +1080,20 @@ mod GurftronDB {
             let caller = get_caller_address();
             let timestamp = get_block_timestamp();
             // Check user document limit (premium users have no limit)
-            let profile = self.user.user_profiles.entry(caller).read();
-            if !self.user.is_user_premium.entry(caller).read() {
+            let profile = self.config.user_profiles.read(caller);
+            if !self.config.is_user_premium.read(caller) {
                 assert(profile.total_documents < MAXIMUM_DOCUMENTS_PER_USER, 'Document limit reached');
             }
             // Generate document ID and update collection
-            let id = self.document.next_id.entry(collection).read();
-            self.document.next_id.entry(collection).write(id + 1);
-            let index = self.collection.num_docs.entry(collection).read();
-            self.collection.doc_ids.entry((collection, index)).write(id);
-            self.collection.num_docs.entry(collection).write(index + 1);
+            let id = self.config.next_id.read(collection);
+            self.config.next_id.write(collection, id + 1);
+            let index = self.config.num_docs.read(collection);
+            self.config.doc_ids.write((collection, index), id);
+            self.config.num_docs.write(collection, index + 1);
             // Compute data hash for integrity
             let data_hash = self._compute_data_hash(@compressed_data);
             // Store document with pending status and enhanced fields
-            self.document.creators.entry((collection, id)).write(caller);
+            self.config.creators.write((collection, id), caller);
             let doc = Document {
                 compressed_data: compressed_data.clone(),
                 creator: caller,
@@ -1115,18 +1109,18 @@ mod GurftronDB {
                 whitelist_total_voters: 0,
                 whitelist_approved_for_deletion: false,
             };
-            self.document.documents.entry((collection, id)).write(doc);
+            self.config.documents.write((collection, id), doc);
             // Store fields and update indices
             self._store_fields(collection, id, @fields);
             // Add to pending validations
-            let pending_count = self.validation.pending_validations_count.read();
-            self.validation.pending_validation_ids.entry(pending_count).write((collection, id));
-            self.validation.pending_validations_count.write(pending_count + 1);
+            let pending_count = self.config.pending_validations_count.read();
+            self.config.pending_validation_ids.write(pending_count, (collection, id));
+            self.config.pending_validations_count.write(pending_count + 1);
             // Update user profile
             let mut updated_profile = profile;
             updated_profile.total_documents += 1;
             updated_profile.reputation_score += 1;
-            self.user.user_profiles.entry(caller).write(updated_profile);
+            self.config.user_profiles.write(caller, updated_profile);
             // Update statistics
             self._update_insert_statistics(@compressed_data);
             self.emit(DocumentInsertedEvent { 
@@ -1144,7 +1138,7 @@ mod GurftronDB {
         /// @return (ByteArray, Array<(felt252, felt252)>) Document data and fields
         fn get(self: @ContractState, collection: felt252, id: felt252) -> (ByteArray, Array<(felt252, felt252)>) {
             self.can_read();
-            let doc = self.document.documents.entry((collection, id)).read();
+            let doc = self.config.documents.read((collection, id));
             assert(!doc.creator.is_zero(), 'Document not found');
             // Only allow approved documents for non-admin users
             let caller = get_caller_address();
@@ -1163,7 +1157,7 @@ mod GurftronDB {
             ref self: ContractState, 
             collection: felt252, 
             id: felt252, 
-            compressed_data: ByteArray, 
+            compressed_ ByteArray, 
             fields: Array<(felt252, felt252)>
         ) {
             self.only_registered_non_banned();
@@ -1174,13 +1168,13 @@ mod GurftronDB {
             self.validate_fields(@fields);
             self.validate_data(@compressed_data);
             let caller = get_caller_address();
-            let creator = self.document.creators.entry((collection, id)).read();
+            let creator = self.config.creators.read((collection, id));
             assert(!creator.is_zero(), 'Document not found');
             assert(caller == creator, 'Only creator can update');
             // Deduct points if not premium
             self._charge_update_points(caller);
             // Calculate size difference for statistics
-            let old_doc = self.document.documents.entry((collection, id)).read();
+            let old_doc = self.config.documents.read((collection, id));
             let old_size = self._calculate_data_size(@old_doc.compressed_data);
             let new_size = self._calculate_data_size(@compressed_data);
             // Update document and reset validation status
@@ -1201,14 +1195,14 @@ mod GurftronDB {
                 whitelist_total_voters: old_doc.whitelist_total_voters,
                 whitelist_approved_for_deletion: old_doc.whitelist_approved_for_deletion,
             };
-            self.document.documents.entry((collection, id)).write(updated_doc);
+            self.config.documents.write((collection, id), updated_doc);
             // Update fields and indices
             self._remove_from_all_indices(collection, id);
             self._store_fields(collection, id, @fields);
             // Add back to pending validations
-            let pending_count = self.validation.pending_validations_count.read();
-            self.validation.pending_validation_ids.entry(pending_count).write((collection, id));
-            self.validation.pending_validations_count.write(pending_count + 1);
+            let pending_count = self.config.pending_validations_count.read();
+            self.config.pending_validation_ids.write(pending_count, (collection, id));
+            self.config.pending_validations_count.write(pending_count + 1);
             // Update database size statistics
             self._update_size_statistics(old_size, new_size);
             self.emit(DocumentUpdatedEvent { 
@@ -1229,26 +1223,26 @@ mod GurftronDB {
             self.check_reputation();
             self.enforce_cooldown('delete');
             let caller = get_caller_address();
-            let creator = self.document.creators.entry((collection, id)).read();
+            let creator = self.config.creators.read((collection, id));
             assert(!creator.is_zero(), 'Document not found');
             assert(caller == creator, 'Only creator can delete');
             // Deduct points if not premium
             self._charge_delete_points(caller);
             // Calculate size for statistics update
-            let doc = self.document.documents.entry((collection, id)).read();
+            let doc = self.config.documents.read((collection, id));
             let doc_size = self._calculate_data_size(@doc.compressed_data);
             // Remove from indices and clean up
             self._remove_from_all_indices(collection, id);
             self._cleanup_document(collection, id);
             // Update user profile
-            let mut profile = self.user.user_profiles.entry(caller).read();
+            let mut profile = self.config.user_profiles.read(caller);
             if profile.total_documents > 0 {
                 profile.total_documents -= 1;
             }
             if doc.validation_status == 'approved' && profile.approved_documents > 0 {
                 profile.approved_documents -= 1;
             }
-            self.user.user_profiles.entry(caller).write(profile);
+            self.config.user_profiles.write(caller, profile);
             // Update statistics (reduce total size)
             self._decrease_size_statistics(doc_size);
             self.emit(DocumentDeletedEvent { 
@@ -1276,7 +1270,7 @@ mod GurftronDB {
             assert(page > 0, 'Page must be >= 1');
             let caller = get_caller_address();
             // Charge for pagination beyond first page
-            if page > 1 && !self.user.is_user_premium.entry(caller).read() {
+            if page > 1 && !self.config.is_user_premium.read(caller) {
                 self._charge_query_points(caller);
             }
             // Process query and return paginated results (approved documents only)
@@ -1305,10 +1299,10 @@ mod GurftronDB {
         fn get_all_data(self: @ContractState, collection: felt252) -> Array<felt252> {
             self.can_read();
             let mut result = ArrayTrait::new();
-            let num_approved = self.collection.approved_docs.entry(collection).read();
+            let num_approved = self.config.approved_docs.read(collection);
             let mut i: u32 = 0;
             while i < num_approved {
-                let id = self.collection.approved_doc_ids.entry((collection, i)).read();
+                let id = self.config.approved_doc_ids.read((collection, i));
                 result.append(id);
                 i += 1;
             }
@@ -1337,10 +1331,10 @@ mod GurftronDB {
         fn admin_get_all_data(self: @ContractState, collection: felt252) -> Array<felt252> {
             self.only_admin();
             let mut result = ArrayTrait::new();
-            let num_docs = self.collection.num_docs.entry(collection).read();
+            let num_docs = self.config.num_docs.read(collection);
             let mut i: u32 = 0;
             while i < num_docs {
-                let id = self.collection.doc_ids.entry((collection, i)).read();
+                let id = self.config.doc_ids.read((collection, i));
                 result.append(id);
                 i += 1;
             }
@@ -1357,28 +1351,28 @@ mod GurftronDB {
             self.enforce_rate_limit('vote', MAX_VOTES_PER_HOUR);
             let caller = get_caller_address();
             assert(!caller.is_zero(), 'Zero address cannot vote');
-            let mut doc = self.document.documents.entry((collection, doc_id)).read();
+            let mut doc = self.config.documents.read((collection, doc_id));
             assert(!doc.creator.is_zero(), 'Document not found');
             assert(doc.validation_status == 'pending', 'Document not pending validation');
             assert(doc.creator != caller, 'Cannot vote on own document');
-            assert(!self.document.document_voters.entry((collection, doc_id, caller)).read(), 'Already voted on this document');
+            assert(!self.config.document_voters.read((collection, doc_id, caller)), 'Already voted on this document');
             // Record the vote
-            self.document.document_voters.entry((collection, doc_id, caller)).write(true);
+            self.config.document_voters.write((collection, doc_id, caller), true);
             if is_valid {
                 doc.positive_votes += 1;
             } else {
                 doc.negative_votes += 1;
             }
             doc.total_voters += 1;
-            self.document.documents.entry((collection, doc_id)).write(doc);
+            self.config.documents.write((collection, doc_id), doc);
             // Award points for voting
-            let current_points = self.user.points.entry(caller).read();
+            let current_points = self.config.points.read(caller);
             let new_points = current_points + VOTE_REWARD_POINTS.try_into().unwrap();
-            self.user.points.entry(caller).write(new_points);
+            self.config.points.write(caller, new_points);
             // Update voter profile
-            let mut profile = self.user.user_profiles.entry(caller).read();
+            let mut profile = self.config.user_profiles.read(caller);
             profile.total_votes_cast += 1;
-            self.user.user_profiles.entry(caller).write(profile);
+            self.config.user_profiles.write(caller, profile);
             self.emit(PointsAwardedForVoting {
                 voter: caller,
                 collection,
@@ -1412,23 +1406,23 @@ mod GurftronDB {
             self.enforce_rate_limit('whitelist_vote', MAX_VOTES_PER_HOUR);
             let voter = get_caller_address();
             assert(!voter.is_zero(), 'Zero address cannot vote');
-            let mut doc = self.document.documents.entry((collection, doc_id)).read();
+            let mut doc = self.config.documents.read((collection, doc_id));
             assert(!doc.creator.is_zero() && doc.validation_status != 'deleted', 'Document not found or deleted');
             assert(doc.creator != voter, 'Cannot vote on own document');
-            assert(!self.document.whitelist_voters.entry((collection, doc_id, voter)).read(), 'Already voted on whitelist');
+            assert(!self.config.whitelist_voters.read((collection, doc_id, voter)), 'Already voted on whitelist');
             // Record the vote
-            self.document.whitelist_voters.entry((collection, doc_id, voter)).write(true);
+            self.config.whitelist_voters.write((collection, doc_id, voter), true);
             if vote_remove {
                 doc.whitelist_remove_votes += 1;
             } else {
                 doc.whitelist_keep_votes += 1;
             }
             doc.whitelist_total_voters += 1;
-            self.document.documents.entry((collection, doc_id)).write(doc);
+            self.config.documents.write((collection, doc_id), doc);
             // Award 2 points for whitelist voting
-            let current_points = self.user.points.entry(voter).read();
+            let current_points = self.config.points.read(voter);
             let new_points = current_points + VOTE_REWARD_POINTS.try_into().unwrap();
-            self.user.points.entry(voter).write(new_points);
+            self.config.points.write(voter, new_points);
             self.emit(PointsAwardedForVoting {
                 voter,
                 collection,
@@ -1460,7 +1454,7 @@ mod GurftronDB {
             collection: felt252, 
             doc_id: felt252
         ) -> (felt252, u32, u32, u32) {
-            let doc = self.document.documents.entry((collection, doc_id)).read();
+            let doc = self.config.documents.read((collection, doc_id));
             assert(!doc.creator.is_zero(), 'Document not found');
             (doc.validation_status, doc.positive_votes, doc.negative_votes, doc.total_voters)
         }
@@ -1473,7 +1467,7 @@ mod GurftronDB {
             self.only_staked_users();
             assert(reason != 0, 'Reason cannot be empty');
             let caller = get_caller_address();
-            let doc = self.document.documents.entry((collection, doc_id)).read();
+            let doc = self.config.documents.read((collection, doc_id));
             assert(!doc.creator.is_zero(), 'Document not found');
             assert(doc.creator != caller, 'Cannot report own document');
             let report_id = self.validation.next_report_id.read();
@@ -1486,7 +1480,7 @@ mod GurftronDB {
                 timestamp: get_block_timestamp(),
                 is_resolved: false,
             };
-            self.validation.reports.entry(report_id).write(report);
+            self.validation.reports.write(report_id, report);
             // Update statistics
             let total_reports = self.validation.total_malicious_reports.read();
             self.validation.total_malicious_reports.write(total_reports + 1);
@@ -1511,8 +1505,8 @@ mod GurftronDB {
             let end_idx = if start_idx + 10 > total_pending { total_pending } else { start_idx + 10 };
             let mut i: u64 = start_idx;
             while i < end_idx {
-                let (collection, doc_id) = self.validation.pending_validation_ids.entry(i).read();
-                let doc = self.document.documents.entry((collection, doc_id)).read();
+                let (collection, doc_id) = self.validation.pending_validation_ids.read(i);
+                let doc = self.config.documents.read((collection, doc_id));
                 if doc.validation_status == 'pending' {
                     result.append((collection, doc_id));
                 }
@@ -1524,9 +1518,9 @@ mod GurftronDB {
         fn register_account(ref self: ContractState) {
             let caller = get_caller_address();
             assert(!caller.is_zero(), 'Cannot register zero address');
-            assert(self.user.accounts.entry(caller).read() == 0, 'Account already registered');
+            assert(self.config.accounts.read(caller) == 0, 'Account already registered');
             let timestamp = get_block_timestamp();
-            self.user.accounts.entry(caller).write(timestamp);
+            self.config.accounts.write(caller, timestamp);
             // Initialize user profile
             let profile = UserProfile {
                 reputation_score: 100, // Starting reputation
@@ -1537,7 +1531,7 @@ mod GurftronDB {
                 total_votes_cast: 0,
                 approved_documents: 0,
             };
-            self.user.user_profiles.entry(caller).write(profile);
+            self.config.user_profiles.write(caller, profile);
             // Update statistics
             self._increment_account_statistics();
             self.emit(AccountRegistered { account: caller, timestamp });
@@ -1548,9 +1542,9 @@ mod GurftronDB {
             self.only_admin();
             assert(!user_address.is_zero(), 'Cannot ban zero address');
             let caller = get_caller_address();
-            self.user.banned_users.entry(user_address).write(true);
+            self.config.banned_users.write(user_address, true);
             // Update reputation severely
-            let mut profile = self.user.user_profiles.entry(user_address).read();
+            let mut profile = self.config.user_profiles.read(user_address);
             let updated_profile = UserProfile {
                 reputation_score: self.config.minimum_reputation_score.read() - 1,
                 total_documents: profile.total_documents,
@@ -1560,7 +1554,7 @@ mod GurftronDB {
                 total_votes_cast: profile.total_votes_cast,
                 approved_documents: profile.approved_documents,
             };
-            self.user.user_profiles.entry(user_address).write(updated_profile);
+            self.config.user_profiles.write(user_address, updated_profile);
             self.emit(UserBannedEvent { 
                 banned_user: user_address, 
                 admin: caller, 
@@ -1574,9 +1568,9 @@ mod GurftronDB {
             self.only_admin();
             assert(!user_address.is_zero(), 'Cannot unban zero address');
             let caller = get_caller_address();
-            self.user.banned_users.entry(user_address).write(false);
+            self.config.banned_users.write(user_address, false);
             // Reset reputation to neutral
-            let mut profile = self.user.user_profiles.entry(user_address).read();
+            let mut profile = self.config.user_profiles.read(user_address);
             let reset_profile = UserProfile {
                 reputation_score: 0,
                 total_documents: profile.total_documents,
@@ -1586,7 +1580,7 @@ mod GurftronDB {
                 total_votes_cast: profile.total_votes_cast,
                 approved_documents: profile.approved_documents,
             };
-            self.user.user_profiles.entry(user_address).write(reset_profile);
+            self.config.user_profiles.write(user_address, reset_profile);
             self.emit(UserUnbannedEvent { 
                 unbanned_user: user_address, 
                 admin: caller,
@@ -1600,7 +1594,7 @@ mod GurftronDB {
             self: @ContractState, 
             user: ContractAddress
         ) -> (i32, u32, u32, bool, u64) {
-            let profile = self.user.user_profiles.entry(user).read();
+            let profile = self.config.user_profiles.read(user);
             (
                 profile.reputation_score,
                 profile.total_documents,
@@ -1724,7 +1718,7 @@ mod GurftronDB {
         fn slash_malicious_stake(ref self: ContractState, user: ContractAddress, amount: u256, reason: felt252) {
             self.only_moderator_or_admin();
             let caller = get_caller_address();
-            let mut stake_info = self.user.user_stakes.entry(user).read();
+            let mut stake_info = self.config.user_stakes.read(user);
             assert(stake_info.amount >= amount, 'Insufficient stake to slash');
             let locked_stake = StakeInfo {
                 amount: stake_info.amount,
@@ -1732,12 +1726,12 @@ mod GurftronDB {
                 unlock_time: stake_info.unlock_time,
                 is_locked: true,
             };
-            self.user.user_stakes.entry(user).write(locked_stake);
+            self.config.user_stakes.write(user, locked_stake);
             // Update reputation severely
-            let mut profile = self.user.user_profiles.entry(user).read();
+            let mut profile = self.config.user_profiles.read(user);
             profile.reputation_score -= 100;
             profile.warning_count += 1;
-            self.user.user_profiles.entry(user).write(profile);
+            self.config.user_profiles.write(user, profile);
             // Update slashing statistics
             let total_slashed = self.config.total_slashed_stakes.read();
             self.config.total_slashed_stakes.write(total_slashed + amount);
@@ -1776,7 +1770,7 @@ mod GurftronDB {
         fn delete_whitelisted_document(ref self: ContractState, collection: felt252, doc_id: felt252) {
             self.only_registered_non_banned();
             let caller = get_caller_address();
-            let doc = self.document.documents.entry((collection, doc_id)).read();
+            let doc = self.config.documents.read((collection, doc_id));
             assert(!doc.creator.is_zero(), 'Document not found');
             assert(doc.whitelist_approved_for_deletion, 'Document not approved for deletion');
             assert(caller == doc.creator || caller == self.config.admin_address.read(), 'Unauthorized');
@@ -1788,14 +1782,14 @@ mod GurftronDB {
             self._remove_from_all_indices(collection, doc_id);
             self._cleanup_document(collection, doc_id);
             // Update user profile
-            let mut profile = self.user.user_profiles.entry(doc.creator).read();
+            let mut profile = self.config.user_profiles.read(doc.creator);
             if profile.total_documents > 0 {
                 profile.total_documents -= 1;
             }
             if profile.approved_documents > 0 {
                 profile.approved_documents -= 1;
             }
-            self.user.user_profiles.entry(doc.creator).write(profile);
+            self.config.user_profiles.write(doc.creator, profile);
             // Update statistics
             self._decrease_size_statistics(doc_size);
             self.emit(DocumentDeletedEvent { 
@@ -1816,8 +1810,8 @@ mod GurftronDB {
             let current_time = get_block_timestamp();
             let mut i = 0_u64;
             while i < total_pending {
-                let (collection, doc_id) = self.validation.pending_validation_ids.entry(i).read();
-                let doc = self.document.documents.entry((collection, doc_id)).read();
+                let (collection, doc_id) = self.validation.pending_validation_ids.read(i);
+                let doc = self.config.documents.read((collection, doc_id));
                 if doc.validation_status == 'pending' && (current_time - doc.created_at) > max_pending_time {
                     self._reject_document(collection, doc_id);
                 }
@@ -1833,16 +1827,16 @@ mod GurftronDB {
     #[external(v0)]
     fn claim_reward(ref self: ContractState) {
         let caller = get_caller_address();
-        assert(!self.user.banned_users.entry(caller).read(), 'User is banned');
+        assert(!self.config.banned_users.read(caller), 'User is banned');
         assert(!self.config.is_circuit_breaker_active.read(), 'System maintenance mode');
-        let profile = self.user.user_profiles.entry(caller).read();
+        let profile = self.config.user_profiles.read(caller);
         assert(profile.reputation_score >= 0, 'Reputation too low for claims');
         assert(profile.warning_count < 5, 'Too many warnings');
-        let stake_info = self.user.user_stakes.entry(caller).read();
+        let stake_info = self.config.user_stakes.read(caller);
         let min_stake = self.config.minimum_stake_amount.read();
         assert(stake_info.amount >= min_stake, 'Must maintain minimum stake');
         assert(!stake_info.is_locked, 'Stake is locked');
-        let current_points = self.user.points.entry(caller).read();
+        let current_points = self.config.points.read(caller);
         let claim_threshold = self.config.points_threshold_for_claim.read();
         assert(current_points >= claim_threshold.try_into().unwrap(), 'Insufficient points');
         let fee_points = (current_points * TRANSACTION_FEE_PERCENT.into()) / 100;
@@ -1850,7 +1844,7 @@ mod GurftronDB {
         assert(points_after_fee >= claim_threshold.try_into().unwrap(), 'Insufficient points after fee');
         let points_to_strk = self.config.points_to_strk_wei.read();
         let base_reward: u256 = points_after_fee.try_into().unwrap() * points_to_strk;
-        let is_premium = self.user.is_user_premium.entry(caller).read();
+        let is_premium = self.config.is_user_premium.read(caller);
         let reward_amount = if is_premium {
             let multiplier = self.config.premium_reward_multiplier.read();
             base_reward * multiplier.into()
@@ -1858,10 +1852,10 @@ mod GurftronDB {
             base_reward
         };
         // Update state first
-        self.user.points.entry(caller).write(0);
+        self.config.points.write(caller, 0);
         let mut updated_profile = profile;
         updated_profile.reputation_score += 5;
-        self.user.user_profiles.entry(caller).write(updated_profile);
+        self.config.user_profiles.write(caller, updated_profile);
         // Emit events
         self.emit(RewardClaimedEvent {
             claimant: caller,
@@ -1889,12 +1883,12 @@ mod GurftronDB {
     /// @notice Gets user's current points balance
     #[external(v0)]
     fn get_points(self: @ContractState, account: ContractAddress) -> i32 {
-        self.user.points.entry(account).read()
+        self.config.points.read(account)
     }
     /// @notice Gets user's claimable points after fees
     #[external(v0)]
     fn get_claimable_points(self: @ContractState, account: ContractAddress) -> u32 {
-        let current_points = self.user.points.entry(account).read();
+        let current_points = self.config.points.read(account);
         let claim_threshold = self.config.points_threshold_for_claim.read();
         if current_points < claim_threshold.try_into().unwrap() {
             return 0;
@@ -1910,17 +1904,17 @@ mod GurftronDB {
     /// @notice Checks if user has premium status
     #[external(v0)]
     fn get_is_user_premium(self: @ContractState, user_address: ContractAddress) -> bool {
-        self.user.is_user_premium.entry(user_address).read()
+        self.config.is_user_premium.read(user_address)
     }
     /// @notice Checks if user is banned
     #[external(v0)]
     fn is_user_banned(self: @ContractState, user_address: ContractAddress) -> bool {
-        self.user.banned_users.entry(user_address).read()
+        self.config.banned_users.read(user_address)
     }
     /// @notice Checks if user has a specific badge
     #[external(v0)]
     fn has_badge(self: @ContractState, account: ContractAddress, badge_id: u64) -> bool {
-        self.user.badges.entry((account, badge_id)).read()
+        self.config.badges.read((account, badge_id))
     }
     /// @notice Gets admin address
     #[external(v0)]
@@ -1935,7 +1929,7 @@ mod GurftronDB {
     /// @notice Calculates potential reward for user
     #[external(v0)]
     fn calculate_reward(self: @ContractState, account: ContractAddress) -> u256 {
-        let current_points = self.user.points.entry(account).read();
+        let current_points = self.config.points.read(account);
         let claim_threshold = self.config.points_threshold_for_claim.read();
         if current_points < claim_threshold.try_into().unwrap() {
             return 0;
@@ -1947,7 +1941,7 @@ mod GurftronDB {
         }
         let points_to_strk = self.config.points_to_strk_wei.read();
         let base_reward: u256 = points_after_fee.try_into().unwrap() * points_to_strk;
-        if self.user.is_user_premium.entry(account).read() {
+        if self.config.is_user_premium.read(account) {
             let multiplier = self.config.premium_reward_multiplier.read();
             base_reward * multiplier.into()
         } else {
@@ -1971,13 +1965,13 @@ mod GurftronDB {
     /// @notice Gets collection information
     #[external(v0)]
     fn get_collection_info(self: @ContractState, collection: felt252) -> (u32, u32, Array<felt252>) {
-        let num_docs = self.collection.num_docs.entry(collection).read();
-        let num_approved = self.collection.approved_docs.entry(collection).read();
-        let num_indexed = self.indexing.num_indexed.entry(collection).read();
+        let num_docs = self.config.num_docs.read(collection);
+        let num_approved = self.config.approved_docs.read(collection);
+        let num_indexed = self.config.num_indexed.read(collection);
         let mut indexed_fields = ArrayTrait::new();
         let mut i: u32 = 0; 
         while i < num_indexed {
-            indexed_fields.append(self.indexing.indexed_fields.entry((collection, i)).read());
+            indexed_fields.append(self.config.indexed_fields.read((collection, i)));
             i += 1;
         }
         (num_docs, num_approved, indexed_fields)
@@ -1985,7 +1979,7 @@ mod GurftronDB {
     /// @notice Checks if user account is registered
     #[external(v0)]
     fn is_account_registered(self: @ContractState, user_address: ContractAddress) -> bool {
-        self.user.accounts.entry(user_address).read() != 0
+        self.config.accounts.read(user_address) != 0
     }
     /// @notice Gets comprehensive database statistics
     #[external(v0)]
@@ -1999,21 +1993,21 @@ mod GurftronDB {
     /// @notice Checks if user can perform specific action (public view)
     #[external(v0)]
     fn can_perform_action(self: @ContractState, user: ContractAddress, _action_type: felt252) -> bool {
-        let stake_info = self.user.user_stakes.entry(user).read();
-        let profile = self.user.user_profiles.entry(user).read();
+        let stake_info = self.config.user_stakes.read(user);
+        let profile = self.config.user_profiles.read(user);
         let min_stake = self.config.minimum_stake_amount.read();
         let min_rep = self.config.minimum_reputation_score.read();
         stake_info.amount >= min_stake && 
         profile.reputation_score >= min_rep &&
         !stake_info.is_locked &&
-        !self.user.banned_users.entry(user).read() &&
+        !self.config.banned_users.read(user) &&
         !self.config.is_circuit_breaker_active.read()
     }
     /// @notice Gets comprehensive user security profile
     #[external(v0)]
     fn get_user_security_profile(self: @ContractState, user: ContractAddress) -> (i32, u32, u32, u32, bool, u256, u64) {
-        let profile = self.user.user_profiles.entry(user).read();
-        let stake_info = self.user.user_stakes.entry(user).read();
+        let profile = self.config.user_profiles.read(user);
+        let stake_info = self.config.user_stakes.read(user);
         (
             profile.reputation_score,
             profile.total_documents,
@@ -2035,7 +2029,7 @@ mod GurftronDB {
     // ============================================================================
     impl InternalImpl of InternalTrait {
         /// @notice Computes hash of data for integrity verification
-        fn _compute_data_hash(self: @ContractState, data: @ByteArray) -> felt252 {
+        fn _compute_data_hash(self: @ContractState,  @ByteArray) -> felt252 {
             let mut hasher = PoseidonHash::new();
             hasher = hasher.update(data.len().into());
             let len = data.len();
@@ -2053,13 +2047,13 @@ mod GurftronDB {
                     i += 1;
                 }
             }
-            hasher.finalize();
+            hasher.finalize()
         }
          /// @notice Enforces action cooldown
         fn enforce_cooldown(ref self: ContractState, action_type: felt252) {
             let caller = get_caller_address();
             let current_time = get_block_timestamp();
-            let last_action = self.user.user_last_actions.entry((caller, action_type)).read();
+            let last_action = self.config.user_last_actions.read((caller, action_type));
             let cooldown = self.config.action_cooldown_period.read();
             if last_action + cooldown > current_time {
                 self.emit(CooldownViolation { 
@@ -2070,14 +2064,14 @@ mod GurftronDB {
                 });
                 assert(false, 'Action on cooldown');
             }
-            self.user.user_last_actions.entry((caller, action_type)).write(current_time);
+            self.config.user_last_actions.write((caller, action_type), current_time);
         }
         /// @notice Enforces rate limiting
         fn enforce_rate_limit(ref self: ContractState, action_type: felt252, max_per_hour: u32) {
             let caller = get_caller_address();
             let current_time = get_block_timestamp();
             let current_hour = current_time / 3600;
-            let current_count = self.user.user_hourly_actions.entry((caller, action_type, current_hour)).read();
+            let current_count = self.config.user_hourly_actions.read((caller, action_type, current_hour));
             if current_count >= max_per_hour {
                 self.emit(RateLimitExceeded { 
                     user: caller, 
@@ -2088,11 +2082,11 @@ mod GurftronDB {
                 });
                 assert(false, 'Rate limit exceeded');
             }
-            self.user.user_hourly_actions.entry((caller, action_type, current_hour)).write(current_count + 1);
+            self.config.user_hourly_actions.write((caller, action_type, current_hour), current_count + 1);
         }
         /// @notice Check validation consensus based on total registered users
         fn _check_validation_consensus(ref self: ContractState, collection: felt252, doc_id: felt252) {
-            let doc = self.document.documents.entry((collection, doc_id)).read();
+            let doc = self.config.documents.read((collection, doc_id));
             let total_users = self.config.total_accounts_registered.read();
             if total_users == 0 {
                 return;
@@ -2109,24 +2103,24 @@ mod GurftronDB {
         /// @notice Approve a document
         fn _approve_document(ref self: ContractState, collection: felt252, doc_id: felt252) {
             let timestamp = get_block_timestamp();
-            let mut doc = self.document.documents.entry((collection, doc_id)).read();
+            let mut doc = self.config.documents.read((collection, doc_id));
             if doc.validation_status != 'pending' {
                 return;
             }
             let creator = doc.creator; // Store creator before modifying doc
             doc.validation_status = 'approved';
-            self.document.documents.entry((collection, doc_id)).write(doc);
-            let approved_count = self.collection.approved_docs.entry(collection).read();
-            self.collection.approved_doc_ids.entry((collection, approved_count)).write(doc_id);
-            self.collection.approved_docs.entry(collection).write(approved_count + 1);
+            self.config.documents.write((collection, doc_id), doc);
+            let approved_count = self.config.approved_docs.read(collection);
+            self.config.approved_doc_ids.write((collection, approved_count), doc_id);
+            self.config.approved_docs.write(collection, approved_count + 1);
             self._remove_from_pending_validations(collection, doc_id);
             // Award approval points and badge
             self._award_approval_points_and_badge(creator, collection, doc_id);
-            let mut creator_profile = self.user.user_profiles.entry(creator).read();
+            let mut creator_profile = self.config.user_profiles.read(creator);
             let old_reputation = creator_profile.reputation_score;
             creator_profile.reputation_score += 10;
             creator_profile.approved_documents += 1;
-            self.user.user_profiles.entry(creator).write(creator_profile);
+            self.config.user_profiles.write(creator, creator_profile);
             self.emit(DocumentApprovedEvent { 
                 collection, 
                 document_id: doc_id, 
@@ -2145,15 +2139,15 @@ mod GurftronDB {
         }
         /// @notice Reject a document
         fn _reject_document(ref self: ContractState, collection: felt252, doc_id: felt252) {
-            let mut doc = self.document.documents.entry((collection, doc_id)).read();
+            let mut doc = self.config.documents.read((collection, doc_id));
             let old_status = doc.validation_status;
             let creator = doc.creator; // Store creator before modifying doc
             doc.validation_status = 'rejected';
-            self.document.documents.entry((collection, doc_id)).write(doc);
+            self.config.documents.write((collection, doc_id), doc);
             // Remove from pending validations
             self._remove_from_pending_validations(collection, doc_id);
             // Penalize creator
-            let mut creator_profile = self.user.user_profiles.entry(creator).read();
+            let mut creator_profile = self.config.user_profiles.read(creator);
             let new_reputation = if creator_profile.reputation_score - 20 < self.config.minimum_reputation_score.read() {
                 self.config.minimum_reputation_score.read()
             } else {
@@ -2161,14 +2155,14 @@ mod GurftronDB {
             };
             creator_profile.reputation_score = new_reputation;
             creator_profile.warning_count += 1;
-            self.user.user_profiles.entry(creator).write(creator_profile);
+            self.config.user_profiles.write(creator, creator_profile);
             // Consider slashing stake if multiple rejections
             if creator_profile.warning_count >= 3 {
-                let mut stake_info = self.user.user_stakes.entry(creator).read();
+                let mut stake_info = self.config.user_stakes.read(creator);
                 let slash_amount = (stake_info.amount * SLASH_PERCENTAGE.into()) / 100;
                 stake_info.amount -= slash_amount;
                 stake_info.is_locked = true;
-                self.user.user_stakes.entry(creator).write(stake_info);
+                self.config.user_stakes.write(creator, stake_info);
                 let total_slashed = self.config.total_slashed_stakes.read();
                 self.config.total_slashed_stakes.write(total_slashed + slash_amount);
                 self.emit(StakeSlashedEvent { 
@@ -2190,12 +2184,12 @@ mod GurftronDB {
         }
         /// @notice Remove document from pending validations list
         fn _remove_from_pending_validations(ref self: ContractState, collection: felt252, doc_id: felt252) {
-            let total_pending = self.validation.pending_validations_count.read();
+            let total_pending = self.config.pending_validations_count.read();
             let mut found_index = total_pending;
             // Find the document in pending list
             let mut i: u64 = 0;
             while i < total_pending {
-                let (pending_collection, pending_doc_id) = self.validation.pending_validation_ids.entry(i).read();
+                let (pending_collection, pending_doc_id) = self.config.pending_validation_ids.read(i);
                 if pending_collection == collection && pending_doc_id == doc_id {
                     found_index = i;
                     break;
@@ -2206,11 +2200,11 @@ mod GurftronDB {
             if found_index < total_pending {
                 let mut j = found_index;
                 while j < total_pending - 1 {
-                    let next_item = self.validation.pending_validation_ids.entry(j + 1).read();
-                    self.validation.pending_validation_ids.entry(j).write(next_item);
+                    let next_item = self.config.pending_validation_ids.read(j + 1);
+                    self.config.pending_validation_ids.write(j, next_item);
                     j += 1;
                 }
-                self.validation.pending_validations_count.write(total_pending - 1);
+                self.config.pending_validations_count.write(total_pending - 1);
             }
         }
         /// @notice Process query for approved documents only
@@ -2219,10 +2213,10 @@ mod GurftronDB {
                 return self._get_all_approved_document_ids(collection);
             }
             let mut result = ArrayTrait::new();
-            let num_approved = self.collection.approved_docs.entry(collection).read();
+            let num_approved = self.config.approved_docs.read(collection);
             let mut i: u32 = 0;
             while i < num_approved {
-                let id = self.collection.approved_doc_ids.entry((collection, i)).read();
+                let id = self.config.approved_doc_ids.read((collection, i));
                 if self._matches_query(collection, id, query) {
                     result.append(id);
                 }
@@ -2233,10 +2227,10 @@ mod GurftronDB {
         /// @notice Get all approved document IDs
         fn _get_all_approved_document_ids(self: @ContractState, collection: felt252) -> Array<felt252> {
             let mut result = ArrayTrait::new();
-            let num_approved = self.collection.approved_docs.entry(collection).read();
+            let num_approved = self.config.approved_docs.read(collection);
             let mut i: u32 = 0;
             while i < num_approved {
-                let id = self.collection.approved_doc_ids.entry((collection, i)).read();
+                let id = self.config.approved_doc_ids.read((collection, i));
                 result.append(id);
                 i += 1;
             }
@@ -2250,9 +2244,9 @@ mod GurftronDB {
             document_id: felt252
         ) {
             let points_to_award = self.config.points_per_insert.read();
-            let current_points = self.user.points.entry(creator).read();
+            let current_points = self.config.points.read(creator);
             let new_points = current_points + points_to_award.try_into().unwrap();
-            self.user.points.entry(creator).write(new_points);
+            self.config.points.write(creator, new_points);
             // Emit event with correct parameters
             self.emit(PointsAwardedForApproval { 
                 recipient: creator,
@@ -2267,7 +2261,7 @@ mod GurftronDB {
             if new_points >= badge_threshold.try_into().unwrap() && 
                current_points < badge_threshold.try_into().unwrap() {
                 let timestamp = get_block_timestamp();
-                self.user.badges.entry((creator, timestamp)).write(true);
+                self.config.badges.write((creator, timestamp), true);
                 self.emit(BadgeEarnedEvent { 
                     recipient: creator, 
                     badge_id: timestamp,
@@ -2278,12 +2272,12 @@ mod GurftronDB {
         }
         /// @notice Charges points for document updates (premium users exempted)
         fn _charge_update_points(ref self: ContractState, account: ContractAddress) {
-            if !self.user.is_user_premium.entry(account).read() {
+            if !self.config.is_user_premium.read(account) {
                 let points_to_deduct = self.config.points_per_update.read();
-                let current_points = self.user.points.entry(account).read();
+                let current_points = self.config.points.read(account);
                 assert(current_points >= points_to_deduct.try_into().unwrap(), 'Insufficient points for update');
                 let new_points = current_points - points_to_deduct.try_into().unwrap();
-                self.user.points.entry(account).write(new_points);
+                self.config.points.write(account, new_points);
                 self.emit(PointsDeducted { 
                     account, 
                     points: points_to_deduct, 
@@ -2295,12 +2289,12 @@ mod GurftronDB {
         }
         /// @notice Charges points for document deletion (premium users exempted)
         fn _charge_delete_points(ref self: ContractState, account: ContractAddress) {
-            if !self.user.is_user_premium.entry(account).read() {
+            if !self.config.is_user_premium.read(account) {
                 let points_to_deduct = self.config.points_per_delete.read();
-                let current_points = self.user.points.entry(account).read();
+                let current_points = self.config.points.read(account);
                 assert(current_points >= points_to_deduct.try_into().unwrap(), 'Insufficient points for delete');
                 let new_points = current_points - points_to_deduct.try_into().unwrap();
-                self.user.points.entry(account).write(new_points);
+                self.config.points.write(account, new_points);
                 self.emit(PointsDeducted { 
                     account, 
                     points: points_to_deduct, 
@@ -2312,12 +2306,12 @@ mod GurftronDB {
         }
         /// @notice Charges points for query pagination (premium users exempted)
         fn _charge_query_points(ref self: ContractState, account: ContractAddress) {
-            if !self.user.is_user_premium.entry(account).read() {
+            if !self.config.is_user_premium.read(account) {
                 let points_to_deduct = self.config.points_per_query_page.read();
-                let current_points = self.user.points.entry(account).read();
+                let current_points = self.config.points.read(account);
                 assert(current_points >= points_to_deduct.try_into().unwrap(), 'Insufficient points for query');
                 let new_points = current_points - points_to_deduct.try_into().unwrap();
-                self.user.points.entry(account).write(new_points);
+                self.config.points.write(account, new_points);
                 self.emit(PointsDeducted { 
                     account, 
                     points: points_to_deduct, 
@@ -2329,7 +2323,7 @@ mod GurftronDB {
         }
         /// @notice Check whitelist consensus
         fn _check_whitelist_consensus(ref self: ContractState, collection: felt252, doc_id: felt252) {
-            let mut doc = self.document.documents.entry((collection, doc_id)).read();
+            let mut doc = self.config.documents.read((collection, doc_id));
             let total_users = self.config.total_accounts_registered.read();
             if total_users == 0 {
                 return;
@@ -2339,7 +2333,7 @@ mod GurftronDB {
             let required_votes: u32 = required_votes.try_into().unwrap();
             if doc.whitelist_remove_votes >= required_votes {
                 doc.whitelist_approved_for_deletion = true;
-                self.document.documents.entry((collection, doc_id)).write(doc);
+                self.config.documents.write((collection, doc_id), doc);
                 self.emit(DocumentWhitelistApproved {
                     collection,
                     document_id: doc_id,
@@ -2355,7 +2349,7 @@ mod GurftronDB {
         // ORIGINAL HELPER FUNCTIONS (Enhanced with Security Checks)
         // ============================================================================
         /// @notice Calculates the size of data in bytes
-        fn _calculate_data_size(self: @ContractState, data: @ByteArray) -> u256 {
+        fn _calculate_data_size(self: @ContractState,  @ByteArray) -> u256 {
             data.len().into()
         }
         /// @notice Updates statistics when an account is registered
@@ -2371,7 +2365,7 @@ mod GurftronDB {
             });
         }
         /// @notice Updates statistics when a document is inserted
-        fn _update_insert_statistics(ref self: ContractState, data: @ByteArray) {
+        fn _update_insert_statistics(ref self: ContractState,  @ByteArray) {
             let current_docs = self.config.total_documents_inserted.read();
             let new_docs_total = current_docs + 1;
             self.config.total_documents_inserted.write(new_docs_total);
@@ -2421,18 +2415,18 @@ mod GurftronDB {
         /// @notice Stores document fields and updates indices
         fn _store_fields(ref self: ContractState, collection: felt252, id: felt252, fields: @Array<(felt252, felt252)>) {
             let len: u32 = fields.len();
-            self.field.field_lengths.entry((collection, id)).write(len);
-            let num_indexed = self.indexing.num_indexed.entry(collection).read(); // Cache storage read
+            self.config.field_lengths.write((collection, id), len);
+            let num_indexed = self.config.num_indexed.read(collection); // Cache storage read
             let mut i: u32 = 0;
             while i < len {
                 let (field, value) = *fields.at(i);
                 assert(field != 0, 'Field name cannot be empty');
-                self.field.fields_list.entry((collection, id, i)).write(field);
-                self.field.fields_data.entry((collection, id, field)).write(value);
+                self.config.fields_list.write((collection, id, i), field);
+                self.config.fields_data.write((collection, id, field), value);
                 if self._is_indexed(collection, field, num_indexed) { // Pass cached value
-                    let num = self.indexing.index_num_ids.entry((collection, field, value)).read();
-                    self.indexing.index_ids.entry((collection, field, value, num)).write(id);
-                    self.indexing.index_num_ids.entry((collection, field, value)).write(num + 1);
+                    let num = self.config.index_num_ids.read((collection, field, value));
+                    self.config.index_ids.write((collection, field, value, num), id);
+                    self.config.index_num_ids.write((collection, field, value), num + 1);
                 }
                 i += 1;
             }
@@ -2440,16 +2434,16 @@ mod GurftronDB {
         /// @notice Retrieves all fields for a document
         fn _get_document_fields(self: @ContractState, collection: felt252, id: felt252) -> Array<(felt252, felt252)> {
             let mut fields = ArrayTrait::new();
-            let len = self.field.field_lengths.entry((collection, id)).read();
+            let len = self.config.field_lengths.read((collection, id));
             let mut i: u32 = 0; 
             while i < len {
-                let field = self.field.fields_list.entry((collection, id, i)).read();
-                let value = self.field.fields_data.entry((collection, id, field)).read();
+                let field = self.config.fields_list.read((collection, id, i));
+                let value = self.config.fields_data.read((collection, id, field));
                 fields.append((field, value));
                 i += 1;
             }
             // Add system fields
-            let doc = self.document.documents.entry((collection, id)).read();
+            let doc = self.config.documents.read((collection, id));
             fields.append(('created_at', doc.created_at.try_into().unwrap()));
             fields.append(('updated_at', doc.updated_at.try_into().unwrap()));
             fields.append(('creator', doc.creator.try_into().unwrap()));
@@ -2460,7 +2454,7 @@ mod GurftronDB {
         fn _is_indexed(self: @ContractState, collection: felt252, field: felt252, num_indexed: u32) -> bool {
             let mut i: u32 = 0;
             while i < num_indexed {
-                if self.indexing.indexed_fields.entry((collection, i)).read() == field {
+                if self.config.indexed_fields.read((collection, i)) == field {
                     return true;
                 }
                 i += 1;
@@ -2469,28 +2463,28 @@ mod GurftronDB {
         }
         /// @notice Removes document from all indices
         fn _remove_from_all_indices(ref self: ContractState, collection: felt252, id: felt252) {
-            let len = self.field.field_lengths.entry((collection, id)).read();
+            let len = self.config.field_lengths.read((collection, id));
             let mut i: u32 = 0;
             while i < len {
-                let field = self.field.fields_list.entry((collection, id, i)).read();
-                let num_indexed = self.indexing.num_indexed.entry(collection).read();
+                let field = self.config.fields_list.read((collection, id, i));
+                let num_indexed = self.config.num_indexed.read(collection);
                 if self._is_indexed(collection, field, num_indexed) {
-                    let value = self.field.fields_data.entry((collection, id, field)).read();
+                    let value = self.config.fields_data.read((collection, id, field));
                     self._remove_from_index(collection, field, value, id);
                 }
-                self.field.fields_data.entry((collection, id, field)).write(0);
-                self.field.fields_list.entry((collection, id, i)).write(0);
+                self.config.fields_data.write((collection, id, field), 0);
+                self.config.fields_list.write((collection, id, i), 0);
                 i += 1;
             }
         }
         /// @notice Removes specific document from an index
         fn _remove_from_index(ref self: ContractState, collection: felt252, field: felt252, value: felt252, id: felt252) {
-            let num = self.indexing.index_num_ids.entry((collection, field, value)).read();
+            let num = self.config.index_num_ids.read((collection, field, value));
             let mut index: u32 = 0;
             let mut found = false;
             // Find the document in the index
             while index < num {
-                if self.indexing.index_ids.entry((collection, field, value, index)).read() == id {
+                if self.config.index_ids.read((collection, field, value, index)) == id {
                     found = true;
                     break;
                 }
@@ -2500,11 +2494,11 @@ mod GurftronDB {
                 // Shift remaining elements
                 let mut k = index;
                 while k < num - 1 {
-                    let next_id = self.indexing.index_ids.entry((collection, field, value, k + 1)).read();
-                    self.indexing.index_ids.entry((collection, field, value, k)).write(next_id);
+                    let next_id = self.config.index_ids.read((collection, field, value, k + 1));
+                    self.config.index_ids.write((collection, field, value, k), next_id);
                     k += 1;
                 }
-                self.indexing.index_num_ids.entry((collection, field, value)).write(num - 1);
+                self.config.index_num_ids.write((collection, field, value), num - 1);
             }
         }
         /// @notice Cleans up document storage after deletion
@@ -2525,15 +2519,15 @@ mod GurftronDB {
                 whitelist_total_voters: 0,
                 whitelist_approved_for_deletion: false,
             };
-            self.document.documents.entry((collection, id)).write(empty_doc);
-            self.document.creators.entry((collection, id)).write(ContractAddress::default());
-            self.field.field_lengths.entry((collection, id)).write(0);
+            self.config.documents.write((collection, id), empty_doc);
+            self.config.creators.write((collection, id), ContractAddress::default());
+            self.config.field_lengths.write((collection, id), 0);
             // Remove from document list
-            let num = self.collection.num_docs.entry(collection).read();
+            let num = self.config.num_docs.read(collection);
             let mut index: u32 = 0;
             let mut found = false;
             while index < num {
-                if self.collection.doc_ids.entry((collection, index)).read() == id {
+                if self.config.doc_ids.read((collection, index)) == id {
                     found = true;
                     break;
                 }
@@ -2543,18 +2537,18 @@ mod GurftronDB {
                 // Shift remaining document IDs
                 let mut k = index;
                 while k < num - 1 {
-                    let next_id = self.collection.doc_ids.entry((collection, k + 1)).read();
-                    self.collection.doc_ids.entry((collection, k)).write(next_id);
+                    let next_id = self.config.doc_ids.read((collection, k + 1));
+                    self.config.doc_ids.write((collection, k), next_id);
                     k += 1;
                 }
-                self.collection.num_docs.entry(collection).write(num - 1);
+                self.config.num_docs.write(collection, num - 1);
             }
             // Remove from approved documents if it was approved
-            let num_approved = self.collection.approved_docs.entry(collection).read();
+            let num_approved = self.config.approved_docs.read(collection);
             let mut approved_index: u32 = 0;
             let mut found_approved = false;
             while approved_index < num_approved {
-                if self.collection.approved_doc_ids.entry((collection, approved_index)).read() == id {
+                if self.config.approved_doc_ids.read((collection, approved_index)) == id {
                     found_approved = true;
                     break;
                 }
@@ -2563,11 +2557,11 @@ mod GurftronDB {
             if found_approved {
                 let mut k = approved_index;
                 while k < num_approved - 1 {
-                    let next_id = self.collection.approved_doc_ids.entry((collection, k + 1)).read();
-                    self.collection.approved_doc_ids.entry((collection, k)).write(next_id);
+                    let next_id = self.config.approved_doc_ids.read((collection, k + 1));
+                    self.config.approved_doc_ids.write((collection, k), next_id);
                     k += 1;
                 }
-                self.collection.approved_docs.entry(collection).write(num_approved - 1);
+                self.config.approved_docs.write(collection, num_approved - 1);
             }
         }
         /// @notice Processes query conditions and returns matching document IDs (all documents)
@@ -2576,7 +2570,7 @@ mod GurftronDB {
                 return self._get_all_document_ids(collection);
             }
             // For simple equality queries on indexed fields, use index
-            let num_indexed = self.indexing.num_indexed.entry(collection).read();
+            let num_indexed = self.config.num_indexed.read(collection);
             if query.len() == 1 {
                 let (field, op, value, _) = *query.at(0);
                 if op == 'eq' && self._is_indexed(collection, field, num_indexed) {
@@ -2589,10 +2583,10 @@ mod GurftronDB {
         /// @notice Gets all document IDs in a collection
         fn _get_all_document_ids(self: @ContractState, collection: felt252) -> Array<felt252> {
             let mut result = ArrayTrait::new();
-            let num_docs = self.collection.num_docs.entry(collection).read();
+            let num_docs = self.config.num_docs.read(collection);
             let mut i: u32 = 0;
             while i < num_docs {
-                result.append(self.collection.doc_ids.entry((collection, i)).read());
+                result.append(self.config.doc_ids.read((collection, i)));
                 i += 1;
             }
             result
@@ -2600,10 +2594,10 @@ mod GurftronDB {
         /// @notice Gets documents from index for equality query
         fn _get_indexed_documents(self: @ContractState, collection: felt252, field: felt252, value: felt252) -> Array<felt252> {
             let mut result = ArrayTrait::new();
-            let num_ids = self.indexing.index_num_ids.entry((collection, field, value)).read();
+            let num_ids = self.config.index_num_ids.read((collection, field, value));
             let mut i: u32 = 0;
             while i < num_ids {
-                result.append(self.indexing.index_ids.entry((collection, field, value, i)).read());
+                result.append(self.config.index_ids.read((collection, field, value, i)));
                 i += 1;
             }
             result
@@ -2611,10 +2605,10 @@ mod GurftronDB {
         /// @notice Scans all documents for complex query conditions
         fn _scan_documents(self: @ContractState, collection: felt252, query: @Array<(felt252, felt252, felt252, felt252)>) -> Array<felt252> {
             let mut result = ArrayTrait::new();
-            let num_docs = self.collection.num_docs.entry(collection).read();
+            let num_docs = self.config.num_docs.read(collection);
             let mut i: u32 = 0;
             while i < num_docs {
-                let id = self.collection.doc_ids.entry((collection, i)).read();
+                let id = self.config.doc_ids.read((collection, i));
                 if self._matches_query(collection, id, query) {
                     result.append(id);
                 }
@@ -2638,7 +2632,7 @@ mod GurftronDB {
         }
         /// @notice Checks if document field matches a specific condition
         fn _matches_condition(self: @ContractState, collection: felt252, id: felt252, field: felt252, op: felt252, value: felt252) -> bool {
-            let actual = self.field.fields_data.entry((collection, id, field)).read();
+            let actual = self.config.fields_data.read((collection, id, field));
             match op {
                 'eq' => actual == value,
                 'ne' => actual != value,
@@ -2648,11 +2642,11 @@ mod GurftronDB {
                 'lte' => actual <= value,
                 'exists' => {
                     // Check if field exists in document
-                    let len = self.field.field_lengths.entry((collection, id)).read();
+                    let len = self.config.field_lengths.read((collection, id));
                     let mut found = false;
                     let mut j: u32 = 0;
                     while j < len {
-                        if self.field.fields_list.entry((collection, id, j)).read() == field {
+                        if self.config.fields_list.read((collection, id, j)) == field {
                             found = true;
                             break;
                         }
@@ -2692,13 +2686,13 @@ mod GurftronDB {
     #[external(v0)]
     fn cleanup_processed_pending_documents(ref self: ContractState) {
         self.only_admin();
-        let total_pending = self.validation.pending_validations_count.read();
+        let total_pending = self.config.pending_validations_count.read();
         let mut cleaned_up = 0_u32;
         let mut i = 0_u64;
         // Only clean up documents that have already been approved or rejected
         while i < total_pending && cleaned_up < 50 {
-            let (collection, doc_id) = self.validation.pending_validation_ids.entry(i).read();
-            let doc = self.document.documents.entry((collection, doc_id)).read();
+            let (collection, doc_id) = self.config.pending_validation_ids.read(i);
+            let doc = self.config.documents.read((collection, doc_id));
             if doc.validation_status != 'pending' {
                 // Remove from pending list since it's already processed
                 self._remove_from_pending_validations(collection, doc_id);
@@ -2712,13 +2706,13 @@ mod GurftronDB {
     fn get_documents_for_validation(self: @ContractState, page: u32) -> Array<(felt252, felt252, felt252, ContractAddress)> {
         assert(page > 0, 'Page must be >= 1');
         let mut result = ArrayTrait::new();
-        let total_pending = self.validation.pending_validations_count.read();
+        let total_pending = self.config.pending_validations_count.read();
         let start_idx: u64 = ((page - 1) * 10).into();
         let end_idx = if start_idx + 10 > total_pending { total_pending } else { start_idx + 10 };
         let mut i: u64 = start_idx;
         while i < end_idx {
-            let (collection, doc_id) = self.validation.pending_validation_ids.entry(i).read();
-            let doc = self.document.documents.entry((collection, doc_id)).read();
+            let (collection, doc_id) = self.config.pending_validation_ids.read(i);
+            let doc = self.config.documents.read((collection, doc_id));
             if doc.validation_status == 'pending' {
                 result.append((collection, doc_id, doc.data_hash, doc.creator));
             }
@@ -2747,7 +2741,7 @@ mod GurftronDB {
         let mut i: u32 = 0;
         while i < documents.len() {
             let (collection, doc_id) = *documents.at(i);
-            let doc = self.document.documents.entry((collection, doc_id)).read();
+            let doc = self.config.documents.read((collection, doc_id));
             if doc.validation_status == 'pending' {
                 self._approve_document(collection, doc_id);
             }
@@ -2761,7 +2755,7 @@ mod GurftronDB {
         let mut i: u32 = 0;
         while i < documents.len() {
             let (collection, doc_id) = *documents.at(i);
-            let doc = self.document.documents.entry((collection, doc_id)).read();
+            let doc = self.config.documents.read((collection, doc_id));
             if doc.validation_status == 'pending' {
                 self._reject_document(collection, doc_id);
             }
@@ -2771,7 +2765,7 @@ mod GurftronDB {
     /// @notice Get comprehensive system health metrics
     #[external(v0)]
     fn get_system_health(self: @ContractState) -> (u64, u64, u64, u32, bool) {
-        let pending_count = self.validation.pending_validations_count.read();
+        let pending_count = self.config.pending_validations_count.read();
         let total_docs = self.config.total_documents_inserted.read();
         let pending_percentage: u32 = if total_docs > 0 { 
             ((pending_count * 100) / total_docs).try_into().unwrap()
@@ -2793,12 +2787,12 @@ mod GurftronDB {
         let mut i: u32 = 0;
         while i < validators.len() {
             let validator = *validators.at(i);
-            let profile = self.user.user_profiles.entry(validator).read();
+            let profile = self.config.user_profiles.read(validator);
             // Only reward if they have cast votes recently
             if profile.total_votes_cast > 0 {
-                let current_points = self.user.points.entry(validator).read();
+                let current_points = self.config.points.read(validator);
                 let new_points = current_points + bonus_points.try_into().unwrap();
-                self.user.points.entry(validator).write(new_points);
+                self.config.points.write(validator, new_points);
                 self.emit(PointsAwarded { 
                     account: validator, 
                     points: bonus_points, 
@@ -2813,8 +2807,8 @@ mod GurftronDB {
     /// @notice Get user's voting history summary
     #[external(v0)]
     fn get_user_voting_stats(self: @ContractState, user: ContractAddress) -> (u32, i32, u32) {
-        let profile = self.user.user_profiles.entry(user).read();
-        let stake_info = self.user.user_stakes.entry(user).read();
+        let profile = self.config.user_profiles.read(user);
+        let stake_info = self.config.user_stakes.read(user);
         let vote_power = if stake_info.amount >= self.config.minimum_stake_amount.read() { 
             if profile.reputation_score > 100 { 2 } else { 1 }
         } else { 0 };
@@ -2823,17 +2817,17 @@ mod GurftronDB {
     /// @notice Check if document can be voted on it
     #[external(v0)]
     fn can_vote_on_document(self: @ContractState, user: ContractAddress, collection: felt252, doc_id: felt252) -> bool {
-        let doc = self.document.documents.entry((collection, doc_id)).read();
-        let has_already_voted = self.document.document_voters.entry((collection, doc_id, user)).read();
-        let stake_info = self.user.user_stakes.entry(user).read();
-        let profile = self.user.user_profiles.entry(user).read();
+        let doc = self.config.documents.read((collection, doc_id));
+        let has_already_voted = self.config.document_voters.read((collection, doc_id, user));
+        let stake_info = self.config.user_stakes.read(user);
+        let profile = self.config.user_profiles.read(user);
         !doc.creator.is_zero() &&
         doc.validation_status == 'pending' &&
         doc.creator != user &&
         !has_already_voted &&
         stake_info.amount >= self.config.minimum_stake_amount.read() &&
         profile.reputation_score >= self.config.minimum_reputation_score.read() &&
-        !self.user.banned_users.entry(user).read() &&
+        !self.config.banned_users.read(user) &&
         !self.config.is_circuit_breaker_active.read()
     }
 }
