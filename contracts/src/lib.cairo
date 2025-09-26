@@ -2381,7 +2381,7 @@ mod GurftronDB {
             self.creators.entry((collection, id)).write(zero_addr);
             
             // Reset field length
-            let zero_len = empty_byte;
+            let zero_len = ba.len();
             self.field_lengths.entry((collection, id)).write(zero_len);
 
             let num = self.num_docs.entry(collection).read();
