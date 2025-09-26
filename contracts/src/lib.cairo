@@ -45,9 +45,9 @@ trait IDatabase<TContractState> {
     fn update(ref self: TContractState, collection: felt252, id: felt252, compressed_data: ByteArray, fields: Array<(felt252, felt252)>);
     fn delete(ref self: TContractState, collection: felt252, id: felt252);
     // Query Operations (Enhanced to filter approved data)
-    fn find(ref self: @TContractState, collection: felt252, query: Array<(felt252, felt252, felt252, felt252)>, page: u32) -> Array<felt252>;
-    fn find_one(ref self: @TContractState, collection: felt252, query: Array<(felt252, felt252, felt252, felt252)>) -> (ByteArray, Array<(felt252, felt252)>);
-    fn get_all_data(self: @TContractState, collection: felt252) -> Array<felt252>;
+    fn find(ref self: TContractState, collection: felt252, query: Array<(felt252, felt252, felt252, felt252)>, page: u32) -> Array<felt252>;
+    fn find_one(ref self: TContractState, collection: felt252, query: Array<(felt252, felt252, felt252, felt252)>) -> (ByteArray, Array<(felt252, felt252)>);
+    fn get_all_data(self: TContractState, collection: felt252) -> Array<felt252>;
     // Admin-only query functions (includes pending data)
     fn admin_find(self: @TContractState, collection: felt252, query: Array<(felt252, felt252, felt252, felt252)>, page: u32) -> Array<felt252>;
     fn admin_get_all_data(self: @TContractState, collection: felt252) -> Array<felt252>;
@@ -241,7 +241,7 @@ struct RewardClaimedEvent {
     #[key]
     claimant: ContractAddress,
     reward_amount: u256,
-    points_used: i32,
+    points_used: u256,
     is_premium_bonus: bool,
     timestamp: u64,
 }
@@ -535,9 +535,9 @@ mod GurftronDB {
         // Storage structures
         Document, StakeInfo, UserProfile, MaliciousReport
     };
+    use starknet::contract_address_const;
     use core::starknet::storage::{Map, StoragePathEntry, StoragePointerReadAccess, StoragePointerWriteAccess};
     use core::num::traits::Zero;
-    use core::hash::Poseidon;
 
     #[feature("deprecated-starknet-consts")]
     mod g_utils;
@@ -798,7 +798,7 @@ mod GurftronDB {
             let points = self.points.entry(caller).read();
             assert(!self.banned_users.entry(caller).read(), 'User is banned');
             assert(!self.is_circuit_breaker_active.read(), 'System maintenance mode');
-            assert(is_premium || points >= 0, 'Negative balance - upgrade to premium');
+            assert(is_premium || points >= 0, 'NEG_BALANCE');
         }
         fn validate_fields(self: @ContractState, fields: @Array<(felt252, felt252)>) {
             assert(fields.len() <= MAXIMUM_FIELD_LENGTH, 'Too many fields');
@@ -1115,7 +1115,7 @@ mod GurftronDB {
         }
 
         fn find(
-            ref self: @ContractState, 
+            ref self: ContractState, 
             collection: felt252, 
             query: Array<(felt252, felt252, felt252, felt252)>, 
             page: u32
@@ -1134,7 +1134,7 @@ mod GurftronDB {
         }
 
         fn find_one(
-            ref self: @ContractState, 
+            ref self: ContractState, 
             collection: felt252, 
             query: Array<(felt252, felt252, felt252, felt252)>
         ) -> (ByteArray, Array<(felt252, felt252)>) {
@@ -1148,7 +1148,7 @@ mod GurftronDB {
             self.get(collection, id)
         }
 
-        fn get_all_data(self: @ContractState, collection: felt252) -> Array<felt252> {
+        fn get_all_data(self: ContractState, collection: felt252) -> Array<felt252> {
             self.can_read();
             self.only_staked_users();
             self.check_reputation();
@@ -1833,13 +1833,20 @@ mod GurftronDB {
     }
 
     impl InternalImpl of InternalTrait {
-        fn _compute_data_hash(self: @ContractState,  @ByteArray) -> felt252 {
-            let mut state = Poseidon::new();
-            state.write(data.len().into());
-            if data.len() > 0 {
-                state.write(data.at(0).unwrap().into());
+        fn _compute_data_hash(self: @ContractState, data: @ByteArray) -> felt252 {
+            let len = data.len();
+            if len == 0 {
+                return 0;
             }
-            state.finalize()
+            // Simple hash: sum of bytes + length
+            let mut hash: felt252 = len.into();
+            let mut i: u32 = 0;
+            while i < len {
+                let byte_val = *data.at(i);
+                hash = (hash * 31 + byte_val.into()) % starknet::info::get_prime();
+                i += 1;
+            }
+            hash
         }
 
         fn enforce_cooldown(ref self: ContractState, action_type: felt252) {
@@ -2182,7 +2189,7 @@ mod GurftronDB {
         fn _decrease_size_statistics(ref self: ContractState, size: u256) {
             let current_total = self.total_database_size_bytes.read();
             let new_total = if current_total >= size {
-                current_total - size_to_remove
+                current_total - size
             } else {
                 0
             };
@@ -2283,12 +2290,10 @@ mod GurftronDB {
 
         fn _cleanup_document(ref self: ContractState, collection: felt252, id: felt252) {
             let empty_doc = Document {
-                compressed_data: ContractAddressGResettable::g_reset(
-                    ContractAddress::from_felt252(123)
-                ),
+                compressed_data: contract_address_const::<0>(),
                 creator: ContractAddressGResettable::g_reset(
                     ContractAddress::from_felt252(123)
-                ),
+                );
                 created_at: U64GResettable::g_reset(999999_u64),
                 updated_at: U64GResettable::g_reset(999999_u64),
                 data_hash: Felt252GResettable::g_reset(123_felt252),
@@ -2305,9 +2310,7 @@ mod GurftronDB {
             self.documents.entry((collection, id)).write(empty_doc);
             
             // Reset creator address
-            let zero_addr = ContractAddressGResettable::g_reset(
-                ContractAddress::from_felt252(123)
-            );
+            let zero_addr = contract_address_const::<0>();
             self.creators.entry((collection, id)).write(zero_addr);
             
             // Reset field length
