@@ -2,7 +2,7 @@
 // Author: Adeyeye George
 // Version: 1.0.0
 // Contact: manomitehq@gmail.com
-// License: MI
+// License: MIT LICENSE
 
 use starknet::{ContractAddress, contract_address_const};
 use starknet::storage::{Map, StoragePathEntry, Vec, VecTrait};
