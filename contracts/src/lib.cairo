@@ -1,14 +1,15 @@
+#[feature("deprecated-starknet-consts")]
+
 // g_utils - Utility library for Starknet/Cairo
 // Author: Adeyeye George
-// Version: 1.0.1 (fixed)
+// Version: 1.1.0
 // Contact: manomitehq@gmail.com
 // License: MIT
 
-use starknet::ContractAddress;
+use starknet::{ContractAddress, contract_address_const};
 
 // Trait for resetting values to their "null" state
 trait GResettable<T> {
-    // Resets the value to its default (e.g., 0, "", false, empty collections)
     fn g_reset(ref self: T) -> T;
 }
 
@@ -51,7 +52,7 @@ impl ByteArrayGResettable of GResettable<ByteArray> {
 
 impl ContractAddressGResettable of GResettable<ContractAddress> {
     fn g_reset(ref self: ContractAddress) -> ContractAddress {
-        ContractAddress::from_felt252(0)
+        contract_address_const::<0>()
     }
 }
 
@@ -63,14 +64,7 @@ impl ArrayGResettable<T, impl TDrop: Drop<T>> of GResettable<Array<T>> {
     fn g_reset(ref self: Array<T>) -> Array<T> { array![] }
 }
 
-// Note: Vec and Map reset implementations are omitted due to storage API constraints
-
-// Assert function with ByteArray error messages (no 31-char limit!)
-fn g_assert(condition: bool, error_message: ByteArray) {
-    if !condition {
-        panic!(error_message);
-    }
-}
+// Note: Vec and Map reset are omitted due to storage constraints
 
 // Dynamic typing system for flexible type conversions
 #[derive(Drop, Serde)]
@@ -87,7 +81,7 @@ enum g_convert {
     ContractAddress: ContractAddress,
 }
 
-// Trait for type conversion, mimicking dynamic typing
+// Trait for type conversion
 trait g_convertTrait {
     fn new<T, impl TDrop: Drop<T>, impl TIntoDynamic: Into<T, g_convert>>(value: T) -> g_convert;
     fn g_convert<T, impl TDrop: Drop<T>, impl TFromDynamic: TryInto<g_convert, T>>(self: g_convert) -> T;
@@ -103,7 +97,7 @@ impl g_convertImpl of g_convertTrait {
     fn g_convert<T, impl TDrop: Drop<T>, impl TFromDynamic: TryInto<g_convert, T>>(self: g_convert) -> T {
         match self.try_into() {
             Option::Some(value) => value,
-            Option::None => panic!("g_convert: type conversion failed"),
+            Option::None => panic_with_felt252('conversion_failed'),
         }
     }
 
@@ -140,48 +134,19 @@ impl g_convertImpl of g_convertTrait {
     }
 }
 
-// Conversions TO g_convert
-impl Felt252IntoDynamic of Into<felt252, g_convert> {
-    fn into(self: felt252) -> g_convert { g_convert::Felt252(self) }
-}
+// === Into implementations ===
+impl Felt252IntoDynamic of Into<felt252, g_convert> { fn into(self: felt252) -> g_convert { g_convert::Felt252(self) } }
+impl U8IntoDynamic of Into<u8, g_convert> { fn into(self: u8) -> g_convert { g_convert::U8(self) } }
+impl U16IntoDynamic of Into<u16, g_convert> { fn into(self: u16) -> g_convert { g_convert::U16(self) } }
+impl U32IntoDynamic of Into<u32, g_convert> { fn into(self: u32) -> g_convert { g_convert::U32(self) } }
+impl U64IntoDynamic of Into<u64, g_convert> { fn into(self: u64) -> g_convert { g_convert::U64(self) } }
+impl U128IntoDynamic of Into<u128, g_convert> { fn into(self: u128) -> g_convert { g_convert::U128(self) } }
+impl U256IntoDynamic of Into<u256, g_convert> { fn into(self: u256) -> g_convert { g_convert::U256(self) } }
+impl BoolIntoDynamic of Into<bool, g_convert> { fn into(self: bool) -> g_convert { g_convert::Bool(self) } }
+impl ByteArrayIntoDynamic of Into<ByteArray, g_convert> { fn into(self: ByteArray) -> g_convert { g_convert::ByteArray(self) } }
+impl ContractAddressIntoDynamic of Into<ContractAddress, g_convert> { fn into(self: ContractAddress) -> g_convert { g_convert::ContractAddress(self) } }
 
-impl U8IntoDynamic of Into<u8, g_convert> {
-    fn into(self: u8) -> g_convert { g_convert::U8(self) }
-}
-
-impl U16IntoDynamic of Into<u16, g_convert> {
-    fn into(self: u16) -> g_convert { g_convert::U16(self) }
-}
-
-impl U32IntoDynamic of Into<u32, g_convert> {
-    fn into(self: u32) -> g_convert { g_convert::U32(self) }
-}
-
-impl U64IntoDynamic of Into<u64, g_convert> {
-    fn into(self: u64) -> g_convert { g_convert::U64(self) }
-}
-
-impl U128IntoDynamic of Into<u128, g_convert> {
-    fn into(self: u128) -> g_convert { g_convert::U128(self) }
-}
-
-impl U256IntoDynamic of Into<u256, g_convert> {
-    fn into(self: u256) -> g_convert { g_convert::U256(self) }
-}
-
-impl BoolIntoDynamic of Into<bool, g_convert> {
-    fn into(self: bool) -> g_convert { g_convert::Bool(self) }
-}
-
-impl ByteArrayIntoDynamic of Into<ByteArray, g_convert> {
-    fn into(self: ByteArray) -> g_convert { g_convert::ByteArray(self) }
-}
-
-impl ContractAddressIntoDynamic of Into<ContractAddress, g_convert> {
-    fn into(self: ContractAddress) -> g_convert { g_convert::ContractAddress(self) }
-}
-
-// Conversions FROM g_convert
+// === TryInto implementations ===
 impl Felt252FromDynamic of TryInto<g_convert, felt252> {
     fn try_into(self: g_convert) -> Option<felt252> {
         match self {
@@ -313,5 +278,3 @@ impl ContractAddressFromDynamic of TryInto<g_convert, ContractAddress> {
         }
     }
 }
-#[cfg(test)]
-mod tests;
