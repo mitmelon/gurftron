@@ -2487,32 +2487,19 @@ mod GurftronDB {
                     a > b
                 },
                 'lt' => {
-                    let actual_u256: u256 = actual.try_into().unwrap_or(0_u256);
-                    let value_u256: u256 = value.try_into().unwrap_or(0_u256);
-                    actual_u256 < value_u256
+                    let a: u256 = actual.try_into().unwrap_or(0_u256);
+                    let b: u256 = value.try_into().unwrap_or(0_u256);
+                    a < b
                 },
                 'gte' => {
-                    let actual_u256: u256 = actual.try_into().unwrap_or(0_u256);
-                    let value_u256: u256 = value.try_into().unwrap_or(0_u256);
-                    actual_u256 >= value_u256
+                    let a: u256 = actual.try_into().unwrap_or(0_u256);
+                    let b: u256 = value.try_into().unwrap_or(0_u256);
+                    a >= b
                 },
                 'lte' => {
-                    let actual_u256: u256 = actual.try_into().unwrap_or(0_u256);
-                    let value_u256: u256 = value.try_into().unwrap_or(0_u256);
-                    actual_u256 <= value_u256
-                },
-                'exists' => {
-                    let len = self.field_lengths.entry((collection, id)).read();
-                    let mut found = false;
-                    let mut j: u32 = 0;
-                    while j < len {
-                        if self.fields_list.entry((collection, id, j)).read() == field {
-                            found = true;
-                            break;
-                        }
-                        j += 1;
-                    }
-                    if value == 1 { found } else { !found }
+                    let a: u256 = actual.try_into().unwrap_or(0_u256);
+                    let b: u256 = value.try_into().unwrap_or(0_u256);
+                    a <= b
                 },
                 _ => false,
             }
