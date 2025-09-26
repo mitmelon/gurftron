@@ -1,8 +1,6 @@
 use starknet::{ContractAddress, get_caller_address, get_block_timestamp, get_contract_address};
 use core::byte_array::ByteArray;
-use core::traits::{TryInto, Into};
-use core::clone::Clone;
-use core::hash::{HashStateTrait, HashStateExTrait};
+use starknet::hash::Poseidon;
 
 /// @title IERC20 Interface for STRK token interactions
 /// @notice Interface for ERC20 token operations required by the contract
@@ -47,7 +45,7 @@ trait IDatabase<TContractState> {
     // Query Operations (Enhanced to filter approved data)
     fn find(ref self: TContractState, collection: felt252, query: Array<(felt252, felt252, felt252, felt252)>, page: u32) -> Array<felt252>;
     fn find_one(ref self: TContractState, collection: felt252, query: Array<(felt252, felt252, felt252, felt252)>) -> (ByteArray, Array<(felt252, felt252)>);
-    fn get_all_data(self: TContractState, collection: felt252) -> Array<felt252>;
+    fn get_all_data(ref self: TContractState, collection: felt252) -> Array<felt252>;
     // Admin-only query functions (includes pending data)
     fn admin_find(self: @TContractState, collection: felt252, query: Array<(felt252, felt252, felt252, felt252)>, page: u32) -> Array<felt252>;
     fn admin_get_all_data(self: @TContractState, collection: felt252) -> Array<felt252>;
@@ -212,7 +210,7 @@ struct PointsAwardedForApproval {
     #[key]
     document_id: felt252,
     points_awarded: u32,
-    total_points: i32,
+    total_points: u32,
     timestamp: u64,
 }
 #[derive(Drop, starknet::Event)]
@@ -224,7 +222,7 @@ struct PointsAwardedForVoting {
     #[key]
     document_id: felt252,
     points_awarded: u32,
-    total_points: i32,
+    total_points: u32,
     vote_type: felt252, // 'approval' or 'whitelist'
     timestamp: u64,
 }
@@ -369,7 +367,7 @@ struct PointsDeducted {
     #[key]
     account: ContractAddress,
     points: u32,
-    total_points: i32,
+    total_points: u32,
     action_type: felt252,
     timestamp: u64,
 }
@@ -398,7 +396,7 @@ struct PointsAwarded {
     #[key]
     account: ContractAddress,
     points: u32,
-    total_points: i32,
+    total_points: u32,
     action_type: felt252,
     timestamp: u64,
 }
@@ -1590,7 +1588,7 @@ mod GurftronDB {
             let caller = get_caller_address();
             let doc = self.documents.entry((collection, doc_id)).read();
             assert(!doc.creator.is_zero(), 'Document not found');
-            assert(doc.whitelist_approved_for_deletion, 'Document not approved for deletion');
+            assert(doc.whitelist_approved_for_deletion, 'NOT_APPROVED');
             assert(caller == doc.creator || caller == self.admin_address.read(), 'Unauthorized');
 
             let creator = doc.creator;
@@ -1639,33 +1637,35 @@ mod GurftronDB {
     }
 
     #[external(v0)]
+    #[external(v0)]
     fn claim_reward(ref self: ContractState) {
         let caller = get_caller_address();
         assert(!self.banned_users.entry(caller).read(), 'User is banned');
         assert(!self.is_circuit_breaker_active.read(), 'System maintenance mode');
         let profile = self.user_profiles.entry(caller).read();
-
         let old_reputation = profile.reputation_score;
         let warning_count = profile.warning_count;
-
         assert(old_reputation >= 0, 'Reputation too low for claims');
         assert(warning_count < 5, 'Too many warnings');
-
+        
         let stake_info = self.user_stakes.entry(caller).read();
         let min_stake = self.minimum_stake_amount.read();
         assert(stake_info.amount >= min_stake, 'Must maintain minimum stake');
         assert(!stake_info.is_locked, 'Stake is locked');
-
-        let current_points: i32 = self.points.entry(caller).read();
-        let claim_threshold: i32 = self.points_threshold_for_claim.read().try_into().unwrap();
+        
+        let current_points: u32 = self.points.entry(caller).read();
+        let claim_threshold: u32 = self.points_threshold_for_claim.read();
         assert(current_points >= claim_threshold, 'Insufficient points');
-
-        let fee_points: i32 = (current_points * TRANSACTION_FEE_PERCENT.try_into().unwrap()) / 100;
+        
+        // Fee in u32
+        let fee_points: u32 = (current_points * TRANSACTION_FEE_PERCENT) / 100;
         let points_after_fee = current_points - fee_points;
         assert(points_after_fee >= claim_threshold, 'Insufficient points after fee');
-
+        
         let points_to_strk = self.points_to_strk_wei.read();
-        let base_reward: u256 = points_after_fee.try_into().unwrap() * points_to_strk;
+        // Convert to u256 ONLY for reward calculation
+        let base_reward: u256 = points_after_fee.into() * points_to_strk;
+        
         let is_premium = self.is_user_premium.entry(caller).read();
         let reward_amount = if is_premium {
             let multiplier = self.premium_reward_multiplier.read();
@@ -1673,20 +1673,19 @@ mod GurftronDB {
         } else {
             base_reward
         };
-
+        
         self.points.entry(caller).write(0);
         let mut updated_profile = profile;
         updated_profile.reputation_score += 5;
         self.user_profiles.entry(caller).write(updated_profile);
-
+        
         self.emit(RewardClaimedEvent {
             claimant: caller,
             reward_amount,
-            points_used: current_points.try_into().unwrap(), // Event expects u256, so convert
+            points_used: current_points.into(), // Event expects u256 → convert
             is_premium_bonus: is_premium,
             timestamp: get_block_timestamp()
         });
-
         self.emit(ReputationChangedEvent { 
             user: caller, 
             old_reputation, 
@@ -1694,7 +1693,7 @@ mod GurftronDB {
             reason: 'reward_claimed',
             timestamp: get_block_timestamp()
         });
-
+        
         let strk_token = IERC20Dispatcher { contract_address: self.strk_token_address.read() };
         let success = strk_token.transfer(caller, reward_amount);
         assert(success, 'Transfer failed');
@@ -1706,22 +1705,18 @@ mod GurftronDB {
     }
 
     #[external(v0)]
-    fn get_claimable_points(self: @ContractState, account: ContractAddress) -> u256 {
-        let current_points: u256 = self.points.entry(account).read();
-        let claim_threshold: u256 = self.points_threshold_for_claim.read().into();
-
+    fn get_claimable_points(self: @ContractState, account: ContractAddress) -> u32 {
+        let current_points: u32 = self.points.entry(account).read();
+        let claim_threshold: u32 = self.points_threshold_for_claim.read();
         if current_points < claim_threshold {
-            return 0_u256;
+            return 0_u32;
         }
-
-        // Calculate fee in u256 (no truncation!)
-        let fee_points: u256 = (current_points * TRANSACTION_FEE_PERCENT.into()) / 100_u256;
+        let fee_points: u32 = (current_points * TRANSACTION_FEE_PERCENT) / 100;
         let points_after_fee = current_points - fee_points;
-
         if points_after_fee >= claim_threshold {
             points_after_fee
         } else {
-            0_u256
+            0_u32
         }
     }
 
@@ -1752,23 +1747,18 @@ mod GurftronDB {
 
     #[external(v0)]
     fn calculate_reward(self: @ContractState, account: ContractAddress) -> u256 {
-        let current_points: u256 = self.points.entry(account).read();
-        let claim_threshold: u256 = self.points_threshold_for_claim.read().into();
-
+        let current_points: u32 = self.points.entry(account).read();
+        let claim_threshold: u32 = self.points_threshold_for_claim.read();
         if current_points < claim_threshold {
             return 0_u256;
         }
-
-        let fee_points: u256 = (current_points * TRANSACTION_FEE_PERCENT.into()) / 100_u256;
+        let fee_points: u32 = (current_points * TRANSACTION_FEE_PERCENT) / 100;
         let points_after_fee = current_points - fee_points;
-
         if points_after_fee < claim_threshold {
             return 0_u256;
         }
-
         let points_to_strk = self.points_to_strk_wei.read();
-        let base_reward: u256 = points_after_fee * points_to_strk;
-
+        let base_reward: u256 = points_after_fee.into() * points_to_strk;
         if self.is_user_premium.entry(account).read() {
             let multiplier = self.premium_reward_multiplier.read();
             base_reward * multiplier.into()
@@ -1854,19 +1844,12 @@ mod GurftronDB {
 
     impl InternalImpl of InternalTrait {
         fn _compute_data_hash(self: @ContractState, data: @ByteArray) -> felt252 {
-            let len = data.len();
-            if len == 0 {
-                return 0;
+            let mut state = Poseidon::new();
+            state.write(data.len().into());
+            if data.len() > 0 {
+                state.write(data.at(0).unwrap().into());
             }
-            let mut hash: felt252 = len.into();
-            let mut i: u32 = 0;
-            while i < len {
-                // Correct way to get byte from ByteArray
-                let byte_val = data.span().at(i).read();
-                hash = (hash * 31 + byte_val.into()) % 3618502788666131213697322783095070105623107215331596699973092056135872020481; // PRIME
-                i += 1;
-            }
-            hash
+            state.finalize()
         }
 
         fn enforce_cooldown(ref self: ContractState, action_type: felt252) {
