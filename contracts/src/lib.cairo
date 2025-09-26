@@ -1889,7 +1889,8 @@ mod GurftronDB {
         fn _compute_data_hash(self: @ContractState, data: @ByteArray) -> felt252 {
             let mut state = PoseidonTrait::new();
             let data_len: u32 = data.len();
-            state = state.update(data_len);
+            
+            state = state.update(data_len.into());
 
             let mut i: u32 = 0;
             while i < data_len {
@@ -1901,7 +1902,7 @@ mod GurftronDB {
 
             state.finalize()
         }
-
+        
         fn enforce_cooldown(ref self: ContractState, action_type: felt252) {
             let caller = get_caller_address();
             let current_time = get_block_timestamp();
