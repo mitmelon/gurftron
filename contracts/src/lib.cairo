@@ -2189,7 +2189,7 @@ mod GurftronDB {
         }
 
         fn _check_whitelist_consensus(ref self: ContractState, collection: felt252, doc_id: felt252) {
-            let mut doc_entry = self.documents.entry((collection, doc_id)).read().clone();
+            let mut doc = self.documents.entry((collection, doc_id)).read().clone();
 
             let creator = doc.creator;
             let data_hash = doc.data_hash;
