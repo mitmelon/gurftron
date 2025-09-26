@@ -1,5 +1,3 @@
-use starknet::{ContractAddress, get_caller_address, get_block_timestamp, get_contract_address};
-
 /// @title IERC20 Interface for STRK token interactions
 /// @notice Interface for ERC20 token operations required by the contract
 #[starknet::interface]
@@ -531,8 +529,9 @@ mod GurftronDB {
         // Storage structures
         Document, StakeInfo, UserProfile, MaliciousReport
     };
+    use starknet::{ContractAddress, get_caller_address, get_block_timestamp, get_contract_address};
     use starknet::storage::{Map, StoragePathEntry, StoragePointerReadAccess, StoragePointerWriteAccess};
-    use starknet::contract_address_const;
+
     use core::byte_array::ByteArray;
     use core::byte_array::ByteArrayTrait;
     use core::hash::HashStateTrait;
@@ -1902,7 +1901,7 @@ mod GurftronDB {
 
             state.finalize()
         }
-        
+
         fn enforce_cooldown(ref self: ContractState, action_type: felt252) {
             let caller = get_caller_address();
             let current_time = get_block_timestamp();
@@ -2359,9 +2358,11 @@ mod GurftronDB {
             let ba: ByteArray = "unknown";
             let empty_byte = ba.rev();
 
+            let unknown_contract_address: ContractAddress = 0x0.try_into().unwrap();
+
             let empty_doc = Document {
                 compressed_data: empty_byte,
-                creator: contract_address_const::<0>(),
+                creator: unknown_contract_address,
                 created_at: 0,
                 updated_at: 0,
                 data_hash: 0,
@@ -2378,7 +2379,7 @@ mod GurftronDB {
             self.documents.entry((collection, id)).write(empty_doc);
             
             // Reset creator address
-            let zero_addr = contract_address_const::<0>();
+            let zero_addr = unknown_contract_address;
             self.creators.entry((collection, id)).write(zero_addr);
             
             // Reset field length
