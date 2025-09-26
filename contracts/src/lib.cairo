@@ -1888,7 +1888,7 @@ mod GurftronDB {
     impl InternalImpl of InternalTrait {
         fn _compute_data_hash(self: @ContractState, data: @ByteArray) -> felt252 {
             let mut state = PoseidonTrait::new();
-            let data_len: u32 = data.len();
+            let data_len: :felt252 = data.len();
             state = state.update(data_len);
 
             let mut i: u32 = 0;
