@@ -464,7 +464,7 @@ struct SecurityParametersUpdated {
 // STORAGE STRUCTS
 // ==============
 
-#[derive(Drop, Copy, starknet::Store)]
+#[derive(Drop, starknet::Store)]
 struct Document {
     compressed_data: ByteArray,
     creator: ContractAddress,
