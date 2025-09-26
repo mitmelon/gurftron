@@ -1293,7 +1293,7 @@ mod GurftronDB {
 
             let creator = doc.creator;
             let whitelist_remove_votes = doc.whitelist_remove_votes;
-            let whitelist_total_voters = doc.whitelist_total_voters;
+            let whitelist_keep_votes = doc.whitelist_keep_votes;
 
             self.documents.entry((collection, doc_id)).write(doc);
             let current_points = self.points.entry(voter).read();
@@ -2203,7 +2203,7 @@ mod GurftronDB {
             let whitelist_remove_votes = doc.whitelist_remove_votes;
             let whitelist_total_voters = doc.whitelist_total_voters;
             
-            if doc.whitelist_remove_votes >= required_votes {
+            if whitelist_remove_votes >= required_votes {
                 doc.whitelist_approved_for_deletion = true;
 
                 doc_entry.write(doc); 
