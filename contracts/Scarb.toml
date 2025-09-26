@@ -8,7 +8,7 @@ cairo-version = "2.8.0"
 
 [dependencies]
 starknet = "2.7.0"
-g_utils = { path = "src/g_utils.cairo" }
+g_utils = { path = "../src/g_utils.cairo" }
 
 [dev-dependencies]
 cairo_test = "2.12.2"
