@@ -539,16 +539,6 @@ mod GurftronDB {
     use core::starknet::storage::{Map, StoragePathEntry, StoragePointerReadAccess, StoragePointerWriteAccess};
     use core::num::traits::Zero;
 
-    #[feature("deprecated-starknet-consts")]
-    mod g_utils;
-    use g_utils::{
-        ContractAddressGResettable,
-        Felt252GResettable,
-        U64GResettable,
-        U32GResettable,
-        BoolGResettable,
-    };
-
     trait ModifierTrait {
         fn only_moderator_or_admin(self: @ContractState);
         fn only_admin(self: @ContractState);
@@ -1146,9 +1136,7 @@ mod GurftronDB {
         ) -> (ByteArray, Array<(felt252, felt252)>) {
             let ids = self.find(collection, query, 1);
             if ids.len() == 0 {
-                let empty_str = ByteArrayGResettable::g_reset("dummy");
-                let empty_arr = ArrayGResettable::g_reset(array![("dummy", "dummy")]);
-                return (empty_str, empty_arr);
+                return ("", array![]);
             }
             let id = *ids.at(0);
             self.get(collection, id)
@@ -2354,7 +2342,7 @@ mod GurftronDB {
             self.creators.entry((collection, id)).write(zero_addr);
             
             // Reset field length
-            let zero_len = U32GResettable::g_reset(999_u32);
+            let zero_len = "".into();
             self.field_lengths.entry((collection, id)).write(zero_len);
 
             let num = self.num_docs.entry(collection).read();
