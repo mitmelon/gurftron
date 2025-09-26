@@ -464,7 +464,7 @@ struct SecurityParametersUpdated {
 // STORAGE STRUCTS
 // ==============
 
-#[derive(Drop, starknet::Store)]
+#[derive(Clone, Drop, starknet::Store)]
 struct Document {
     compressed_data: ByteArray,
     creator: ContractAddress,
@@ -500,7 +500,7 @@ struct UserProfile {
     approved_documents: u32, // Count of approved documents
 }
 
-#[derive(Drop, starknet::Store)]
+#[derive(Drop, Copy, starknet::Store)]
 struct MaliciousReport {
     reporter: ContractAddress,
     collection: felt252,
@@ -2005,7 +2005,8 @@ mod GurftronDB {
         }
 
         fn _reject_document(ref self: ContractState, collection: felt252, doc_id: felt252) {
-            let mut doc = self.documents.entry((collection, doc_id)).read();
+            let mut doc = self.documents.entry((collection, doc_id)).read().clone();
+
             let old_status = doc.validation_status;
             let creator = doc.creator;
 
@@ -2188,8 +2189,7 @@ mod GurftronDB {
         }
 
         fn _check_whitelist_consensus(ref self: ContractState, collection: felt252, doc_id: felt252) {
-            let mut doc_entry = self.documents.entry((collection, doc_id)); 
-            let mut doc = doc_entry.read();
+            let mut doc_entry = self.documents.entry((collection, doc_id)).read().clone();
 
             let creator = doc.creator;
             let data_hash = doc.data_hash;
