@@ -2197,14 +2197,14 @@ mod GurftronDB {
             }
             let total_u32: u32 = total_users.try_into().unwrap();
             let required_votes = (total_u32 * APPROVAL_PERCENTAGE) / 100;
+
+            let creator = doc.creator;
+            let data_hash = doc.data_hash;
+            let whitelist_remove_votes = doc.whitelist_remove_votes;
+            let whitelist_total_voters = doc.whitelist_total_voters;
             
             if doc.whitelist_remove_votes >= required_votes {
                 doc.whitelist_approved_for_deletion = true;
-                
-                let creator = doc.creator;
-                let data_hash = doc.data_hash;
-                let whitelist_remove_votes = doc.whitelist_remove_votes;
-                let whitelist_total_voters = doc.whitelist_total_voters;
 
                 doc_entry.write(doc); 
 
