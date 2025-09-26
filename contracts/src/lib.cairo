@@ -1290,6 +1290,11 @@ mod GurftronDB {
             self.whitelist_voters.entry((collection, doc_id, voter)).write(true);
             if vote_remove { doc.whitelist_remove_votes += 1; } else { doc.whitelist_keep_votes += 1; }
             doc.whitelist_total_voters += 1;
+
+            let creator = doc.creator;
+            let whitelist_remove_votes = doc.whitelist_remove_votes;
+            let whitelist_total_voters = doc.whitelist_total_voters;
+
             self.documents.entry((collection, doc_id)).write(doc);
             let current_points = self.points.entry(voter).read();
             let new_points = current_points + VOTE_REWARD_POINTS.try_into().unwrap();
@@ -1307,10 +1312,10 @@ mod GurftronDB {
                 voter,
                 collection,
                 document_id: doc_id,
-                creator: doc.creator,
+                creator: creator,
                 vote_remove,
-                remove_votes: doc.whitelist_remove_votes,
-                keep_votes: doc.whitelist_keep_votes,
+                remove_votes: whitelist_remove_votes,
+                keep_votes: whitelist_keep_votes,
                 timestamp: get_block_timestamp()
             });
             self._check_whitelist_consensus(collection, doc_id);
@@ -2192,14 +2197,19 @@ mod GurftronDB {
             let required_votes = (total_u32 * APPROVAL_PERCENTAGE) / 100;
             if doc.whitelist_remove_votes >= required_votes {
                 doc.whitelist_approved_for_deletion = true;
+                let creator = doc.creator;
+                let data_hash = doc.data_hash;
+                let whitelist_remove_votes = doc.whitelist_remove_votes;
+                let whitelist_total_voters = doc.whitelist_total_voters;
+
                 self.documents.entry((collection, doc_id)).write(doc);
                 self.emit(DocumentWhitelistApproved {
                     collection,
                     document_id: doc_id,
-                    creator: doc.creator,
-                    data_hash: doc.data_hash,
-                    remove_votes: doc.whitelist_remove_votes,
-                    total_votes: doc.whitelist_total_voters,
+                    creator: creator,
+                    data_hash: data_hash,
+                    remove_votes: whitelist_remove_votes,
+                    total_votes: whitelist_total_voters,
                     timestamp: get_block_timestamp()
                 });
             }
