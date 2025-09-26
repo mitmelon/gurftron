@@ -534,6 +534,7 @@ mod GurftronDB {
     use starknet::storage::{Map, StoragePathEntry, StoragePointerReadAccess, StoragePointerWriteAccess};
     use starknet::contract_address_const;
     use core::byte_array::ByteArray;
+    use core::byte_array::ByteArrayTrait;
     use core::hash::HashStateTrait;
     use core::poseidon::PoseidonTrait;
     use core::num::traits::Zero;
@@ -2354,8 +2355,14 @@ mod GurftronDB {
         }
 
         fn _cleanup_document(ref self: ContractState, collection: felt252, id: felt252) {
+
+            let ba: ByteArray = "unknown";
+            let byte = ba.at(0).unwrap();
+
+
+
             let empty_doc = Document {
-                compressed_data: ByteArray::new(),
+                compressed_data: byte,
                 creator: contract_address_const::<0>(),
                 created_at: 0,
                 updated_at: 0,
