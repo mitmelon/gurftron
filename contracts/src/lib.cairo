@@ -650,7 +650,7 @@ mod GurftronDB {
         approval_percentage: i32,
         slash_percentage: i32,
         transaction_fee_percent: i32,
-        points: Map<ContractAddress, i32>,
+        points: Map<ContractAddress, u32>,
         badges: Map<(ContractAddress, u64), bool>,
         is_user_premium: Map<ContractAddress, bool>,
         banned_users: Map<ContractAddress, bool>,
@@ -1092,9 +1092,14 @@ mod GurftronDB {
             assert(caller == creator, 'Only creator can delete');
             self._charge_delete_points(caller);
             let doc = self.documents.entry((collection, id)).read();
+
+            let creator = doc.creator;
+            let data_hash = doc.data_hash;
+
             let doc_size = self._calculate_data_size(@doc.compressed_data);
             self._remove_from_all_indices(collection, id);
             self._cleanup_document(collection, id);
+
             let mut profile = self.user_profiles.entry(caller).read();
             if profile.total_documents > 0 {
                 profile.total_documents -= 1;
@@ -1104,12 +1109,13 @@ mod GurftronDB {
             }
             self.user_profiles.entry(caller).write(profile);
             self._decrease_size_statistics(doc_size);
+
             self.emit(DocumentDeletedEvent { 
                 caller, 
                 collection, 
                 document_id: id,
-                data_hash: doc.data_hash,
-                creator: doc.creator,
+                data_hash,
+                creator,
                 timestamp: get_block_timestamp()
             });
         }
@@ -1148,7 +1154,7 @@ mod GurftronDB {
             self.get(collection, id)
         }
 
-        fn get_all_data(self: ContractState, collection: felt252) -> Array<felt252> {
+        fn get_all_data(ref self: ContractState, collection: felt252) -> Array<felt252> {
             self.can_read();
             self.only_staked_users();
             self.check_reputation();
@@ -1375,15 +1381,22 @@ mod GurftronDB {
             assert(!user_address.is_zero(), 'Cannot ban zero address');
             let caller = get_caller_address();
             self.banned_users.entry(user_address).write(true);
-            let mut profile = self.user_profiles.entry(user_address).read();
+            let profile = self.user_profiles.entry(user_address).read();
+
+            let total_documents = profile.total_documents;
+            let last_action_time = profile.last_action_time;
+            let is_premium = profile.is_premium;
+            let total_votes_cast = profile.total_votes_cast;
+            let approved_documents = profile.approved_documents;
+
             let updated_profile = UserProfile {
                 reputation_score: self.minimum_reputation_score.read() - 1,
-                total_documents: profile.total_documents,
-                last_action_time: profile.last_action_time,
-                is_premium: profile.is_premium,
+                total_documents,
+                last_action_time,
+                is_premium,
                 warning_count: profile.warning_count,
-                total_votes_cast: profile.total_votes_cast,
-                approved_documents: profile.approved_documents,
+                total_votes_cast,
+                approved_documents,
             };
             self.user_profiles.entry(user_address).write(updated_profile);
             self.emit(UserBannedEvent { 
@@ -1399,15 +1412,22 @@ mod GurftronDB {
             assert(!user_address.is_zero(), 'Cannot unban zero address');
             let caller = get_caller_address();
             self.banned_users.entry(user_address).write(false);
-            let mut profile = self.user_profiles.entry(user_address).read();
+            let profile = self.user_profiles.entry(user_address).read();
+
+            let total_documents = profile.total_documents;
+            let last_action_time = profile.last_action_time;
+            let is_premium = profile.is_premium;
+            let total_votes_cast = profile.total_votes_cast;
+            let approved_documents = profile.approved_documents;
+
             let reset_profile = UserProfile {
                 reputation_score: 0,
-                total_documents: profile.total_documents,
-                last_action_time: profile.last_action_time,
-                is_premium: profile.is_premium,
+                total_documents,
+                last_action_time,
+                is_premium,
                 warning_count: 0,
-                total_votes_cast: profile.total_votes_cast,
-                approved_documents: profile.approved_documents,
+                total_votes_cast,
+                approved_documents,
             };
             self.user_profiles.entry(user_address).write(reset_profile);
             self.emit(UserUnbannedEvent { 
@@ -1584,25 +1604,31 @@ mod GurftronDB {
             assert(!doc.creator.is_zero(), 'Document not found');
             assert(doc.whitelist_approved_for_deletion, 'Document not approved for deletion');
             assert(caller == doc.creator || caller == self.admin_address.read(), 'Unauthorized');
+
+            let creator = doc.creator;
+            let data_hash = doc.data_hash;
+
             self._charge_delete_points(caller);
             let doc_size = self._calculate_data_size(@doc.compressed_data);
             self._remove_from_all_indices(collection, doc_id);
             self._cleanup_document(collection, doc_id);
-            let mut profile = self.user_profiles.entry(doc.creator).read();
+
+            let mut profile = self.user_profiles.entry(creator).read();
             if profile.total_documents > 0 {
                 profile.total_documents -= 1;
             }
             if profile.approved_documents > 0 {
                 profile.approved_documents -= 1;
             }
-            self.user_profiles.entry(doc.creator).write(profile);
+            self.user_profiles.entry(creator).write(profile);
             self._decrease_size_statistics(doc_size);
+
             self.emit(DocumentDeletedEvent { 
                 caller, 
                 collection, 
                 document_id: doc_id,
-                data_hash: doc.data_hash,
-                creator: doc.creator,
+                data_hash,
+                creator,
                 timestamp: get_block_timestamp()
             });
         }
@@ -1630,23 +1656,28 @@ mod GurftronDB {
         assert(!self.banned_users.entry(caller).read(), 'User is banned');
         assert(!self.is_circuit_breaker_active.read(), 'System maintenance mode');
         let profile = self.user_profiles.entry(caller).read();
-        assert(profile.reputation_score >= 0, 'Reputation too low for claims');
-        assert(profile.warning_count < 5, 'Too many warnings');
+
+        let old_reputation = profile.reputation_score;
+        let warning_count = profile.warning_count;
+
+        assert(old_reputation >= 0, 'Reputation too low for claims');
+        assert(warning_count < 5, 'Too many warnings');
+
         let stake_info = self.user_stakes.entry(caller).read();
         let min_stake = self.minimum_stake_amount.read();
         assert(stake_info.amount >= min_stake, 'Must maintain minimum stake');
         assert(!stake_info.is_locked, 'Stake is locked');
-        
-        let current_points: u256 = self.points.entry(caller).read();
-        let claim_threshold: u256 = self.points_threshold_for_claim.read().into();
+
+        let current_points: i32 = self.points.entry(caller).read();
+        let claim_threshold: i32 = self.points_threshold_for_claim.read().try_into().unwrap();
         assert(current_points >= claim_threshold, 'Insufficient points');
 
-        let fee_points: u256 = (current_points * TRANSACTION_FEE_PERCENT.into()) / 100_u256;
+        let fee_points: i32 = (current_points * TRANSACTION_FEE_PERCENT.try_into().unwrap()) / 100;
         let points_after_fee = current_points - fee_points;
         assert(points_after_fee >= claim_threshold, 'Insufficient points after fee');
 
         let points_to_strk = self.points_to_strk_wei.read();
-        let base_reward: u256 = points_after_fee * points_to_strk;
+        let base_reward: u256 = points_after_fee.try_into().unwrap() * points_to_strk;
         let is_premium = self.is_user_premium.entry(caller).read();
         let reward_amount = if is_premium {
             let multiplier = self.premium_reward_multiplier.read();
@@ -1659,22 +1690,23 @@ mod GurftronDB {
         let mut updated_profile = profile;
         updated_profile.reputation_score += 5;
         self.user_profiles.entry(caller).write(updated_profile);
-        
+
         self.emit(RewardClaimedEvent {
             claimant: caller,
-            reward_amount: reward_amount,
-            points_used: current_points,
+            reward_amount,
+            points_used: current_points.try_into().unwrap(), // Event expects u256, so convert
             is_premium_bonus: is_premium,
             timestamp: get_block_timestamp()
         });
+
         self.emit(ReputationChangedEvent { 
             user: caller, 
-            old_reputation: profile.reputation_score, 
+            old_reputation, 
             new_reputation: updated_profile.reputation_score,
             reason: 'reward_claimed',
             timestamp: get_block_timestamp()
         });
-        
+
         let strk_token = IERC20Dispatcher { contract_address: self.strk_token_address.read() };
         let success = strk_token.transfer(caller, reward_amount);
         assert(success, 'Transfer failed');
@@ -1838,12 +1870,12 @@ mod GurftronDB {
             if len == 0 {
                 return 0;
             }
-            // Simple hash: sum of bytes + length
             let mut hash: felt252 = len.into();
             let mut i: u32 = 0;
             while i < len {
-                let byte_val = *data.at(i);
-                hash = (hash * 31 + byte_val.into()) % starknet::info::get_prime();
+                // Correct way to get byte from ByteArray
+                let byte_val = data.span().at(i).read();
+                hash = (hash * 31 + byte_val.into()) % 3618502788666131213697322783095070105623107215331596699973092056135872020481; // PRIME
                 i += 1;
             }
             hash
@@ -1906,27 +1938,33 @@ mod GurftronDB {
                 return;
             }
             let creator = doc.creator;
+            let positive_votes = doc.positive_votes;
+            let total_voters = doc.total_voters;
+
             let updated_doc = Document {
                 validation_status: 'approved',
                 ..doc
             };
             self.documents.entry((collection, doc_id)).write(updated_doc);
+
             let approved_count = self.approved_docs.entry(collection).read();
             self.approved_doc_ids.entry((collection, approved_count)).write(doc_id);
             self.approved_docs.entry(collection).write(approved_count + 1);
             self._remove_from_pending_validations(collection, doc_id);
             self._award_approval_points_and_badge(creator, collection, doc_id);
+
             let mut creator_profile = self.user_profiles.entry(creator).read();
             let old_reputation = creator_profile.reputation_score;
             creator_profile.reputation_score += 10;
             creator_profile.approved_documents += 1;
             self.user_profiles.entry(creator).write(creator_profile);
+
             self.emit(DocumentApprovedEvent { 
                 collection, 
                 document_id: doc_id, 
                 creator,
-                positive_votes: doc.positive_votes,
-                total_votes: doc.total_voters,
+                positive_votes,
+                total_votes: total_voters,
                 timestamp
             });
             self.emit(ReputationChangedEvent { 
@@ -1942,8 +1980,10 @@ mod GurftronDB {
             let mut doc = self.documents.entry((collection, doc_id)).read();
             let old_status = doc.validation_status;
             let creator = doc.creator;
+
             doc.validation_status = 'rejected';
             self.documents.entry((collection, doc_id)).write(doc);
+
             self._remove_from_pending_validations(collection, doc_id);
             let mut creator_profile = self.user_profiles.entry(creator).read();
             let new_reputation = if creator_profile.reputation_score - 20 < self.minimum_reputation_score.read() {
@@ -1954,6 +1994,7 @@ mod GurftronDB {
             creator_profile.reputation_score = new_reputation;
             creator_profile.warning_count += 1;
             self.user_profiles.entry(creator).write(creator_profile);
+
             if creator_profile.warning_count >= 3 {
                 let mut stake_info = self.user_stakes.entry(creator).read();
                 let slash_amount = (stake_info.amount * SLASH_PERCENTAGE.into()) / 100;
@@ -1970,6 +2011,7 @@ mod GurftronDB {
                     timestamp: get_block_timestamp()
                 });
             }
+
             self.emit(DocumentStatusChanged { 
                 collection, 
                 doc_id, 
@@ -2290,21 +2332,19 @@ mod GurftronDB {
 
         fn _cleanup_document(ref self: ContractState, collection: felt252, id: felt252) {
             let empty_doc = Document {
-                compressed_data: contract_address_const::<0>(),
-                creator: ContractAddressGResettable::g_reset(
-                    ContractAddress::from_felt252(123)
-                );
-                created_at: U64GResettable::g_reset(999999_u64),
-                updated_at: U64GResettable::g_reset(999999_u64),
-                data_hash: Felt252GResettable::g_reset(123_felt252),
+                compressed_data: "".into(),
+                creator: contract_address_const::<0>(),
+                created_at: 0,
+                updated_at: 0,
+                data_hash: 0,
                 validation_status: 'deleted',
-                positive_votes: U32GResettable::g_reset(999_u32),
-                negative_votes: U32GResettable::g_reset(999_u32),
-                total_voters: U32GResettable::g_reset(999_u32),
-                whitelist_remove_votes: U32GResettable::g_reset(999_u32),
-                whitelist_keep_votes: U32GResettable::g_reset(999_u32),
-                whitelist_total_voters: U32GResettable::g_reset(999_u32),
-                whitelist_approved_for_deletion: BoolGResettable::g_reset(true),
+                positive_votes: 0,
+                negative_votes: 0,
+                total_voters: 0,
+                whitelist_remove_votes: 0,
+                whitelist_keep_votes: 0,
+                whitelist_total_voters: 0,
+                whitelist_approved_for_deletion: false,
             };
             
             self.documents.entry((collection, id)).write(empty_doc);
