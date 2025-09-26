@@ -2206,7 +2206,7 @@ mod GurftronDB {
             if whitelist_remove_vote >= required_votes {
                 doc.whitelist_approved_for_deletion = true;
 
-                self.documents.entry((collection, doc_id)).write(doc);
+                //self.documents.entry((collection, doc_id)).write(doc);
 
                 self.emit(DocumentWhitelistApproved {
                     collection,
