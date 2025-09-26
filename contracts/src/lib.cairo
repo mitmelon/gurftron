@@ -532,7 +532,7 @@ mod GurftronDB {
         // Storage structures
         Document, StakeInfo, UserProfile, MaliciousReport
     };
-    use starknet::storage::Map;
+    use core::starknet::storage::{Map, StoragePathEntry, StoragePointerReadAccess, StoragePointerWriteAccess};
     use starknet::hash::{PoseidonHasher, Hasher};
     use core::num::traits::Zero;
 
