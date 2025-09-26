@@ -464,7 +464,7 @@ struct SecurityParametersUpdated {
 // STORAGE STRUCTS
 // ==============
 
-#[derive(Drop, starknet::Store)]
+#[derive(Drop, Copy, starknet::Store)]
 struct Document {
     compressed_data: ByteArray,
     creator: ContractAddress,
@@ -481,7 +481,7 @@ struct Document {
     whitelist_approved_for_deletion: bool,
 }
 
-#[derive(Drop, starknet::Store)]
+#[derive(Drop, Copy, starknet::Store)]
 struct StakeInfo {
     amount: u256,
     stake_time: u64,
@@ -489,7 +489,7 @@ struct StakeInfo {
     is_locked: bool,
 }
 
-#[derive(Drop, starknet::Store)]
+#[derive(Drop, Copy, starknet::Store)]
 struct UserProfile {
     reputation_score: i32,
     total_documents: u32,
@@ -531,8 +531,10 @@ mod GurftronDB {
         // Storage structures
         Document, StakeInfo, UserProfile, MaliciousReport
     };
-    use core::starknet::storage::{Map, StoragePathEntry, StoragePointerReadAccess, StoragePointerWriteAccess};
-    use starknet::ByteArray;
+    use starknet::storage::{Map, StoragePathEntry, StoragePointerReadAccess, StoragePointerWriteAccess};
+    use starknet::contract_address_const;
+    use core::byte_array::ByteArray;
+    use core::hash::HashStateTrait;
     use core::poseidon::PoseidonTrait;
     use core::num::traits::Zero;
 
@@ -955,6 +957,7 @@ mod GurftronDB {
             self.validate_fields(@fields);
             self.validate_data(@compressed_data);
             assert(collection != 0, 'Collection name cannot be empty');
+            
             let caller = get_caller_address();
             let timestamp = get_block_timestamp();
             let profile = self.user_profiles.entry(caller).read();
@@ -963,10 +966,14 @@ mod GurftronDB {
             let index = self.num_docs.entry(collection).read();
             self.doc_ids.entry((collection, index)).write(id);
             self.num_docs.entry(collection).write(index + 1);
-            let data_hash = self._compute_data_hash(@compressed_data);
+            
+            // Extract data reference before moving compressed_data
+            let data_ref = @compressed_data;
+            let data_hash = self._compute_data_hash(data_ref);
+            
             self.creators.entry((collection, id)).write(caller);
             let doc = Document {
-                compressed_data: compressed_data.clone(),
+                compressed_data: compressed_data, // compressed_data moved here
                 creator: caller,
                 created_at: timestamp,
                 updated_at: timestamp,
@@ -981,15 +988,20 @@ mod GurftronDB {
                 whitelist_approved_for_deletion: false,
             };
             self.documents.entry((collection, id)).write(doc);
+            
             self._store_fields(collection, id, @fields);
             let pending_count = self.pending_validations_count.read();
             self.pending_validation_ids.entry(pending_count).write((collection, id));
             self.pending_validations_count.write(pending_count + 1);
+            
             let mut updated_profile = profile;
             updated_profile.total_documents += 1;
             updated_profile.reputation_score += 1;
             self.user_profiles.entry(caller).write(updated_profile);
-            self._update_insert_statistics(@compressed_data);
+            
+            // Use the reference we stored earlier
+            self._update_insert_statistics(data_ref);
+            
             self.emit(DocumentInsertedEvent { 
                 caller, 
                 collection, 
@@ -1026,18 +1038,24 @@ mod GurftronDB {
             self.enforce_rate_limit('update', MAX_UPDATES_PER_HOUR);
             self.validate_fields(@fields);
             self.validate_data(@compressed_data);
+            
             let caller = get_caller_address();
             let creator = self.creators.entry((collection, id)).read();
             assert(!creator.is_zero(), 'Document not found');
             assert(caller == creator, 'Only creator can update');
+            
             self._charge_update_points(caller);
             let old_doc = self.documents.entry((collection, id)).read();
             let old_size = self._calculate_data_size(@old_doc.compressed_data);
-            let new_size = self._calculate_data_size(@compressed_data);
+            
+            // Extract data reference and hash before moving compressed_data
+            let data_ref = @compressed_data;
+            let new_size = self._calculate_data_size(data_ref);
             let timestamp = get_block_timestamp();
-            let data_hash = self._compute_data_hash(@compressed_data);
+            let data_hash = self._compute_data_hash(data_ref);
+            
             let updated_doc = Document {
-                compressed_data: compressed_data,
+                compressed_data: compressed_data, // moved here
                 creator: old_doc.creator,
                 created_at: old_doc.created_at,
                 updated_at: timestamp,
@@ -1052,12 +1070,16 @@ mod GurftronDB {
                 whitelist_approved_for_deletion: old_doc.whitelist_approved_for_deletion,
             };
             self.documents.entry((collection, id)).write(updated_doc);
+            
             self._remove_from_all_indices(collection, id);
             self._store_fields(collection, id, @fields);
+            
             let pending_count = self.pending_validations_count.read();
             self.pending_validation_ids.entry(pending_count).write((collection, id));
             self.pending_validations_count.write(pending_count + 1);
+            
             self._update_size_statistics(old_size, new_size);
+            
             self.emit(DocumentUpdatedEvent { 
                 caller, 
                 collection, 
@@ -1204,13 +1226,19 @@ mod GurftronDB {
             let caller = get_caller_address();
             assert(!caller.is_zero(), 'Zero address cannot vote');
             let mut doc = self.documents.entry((collection, doc_id)).read();
+
             assert(!doc.creator.is_zero(), 'Document not found');
             assert(doc.validation_status == 'pending', 'Document not pending validation');
             assert(doc.creator != caller, 'Cannot vote on own document');
             assert(!self.document_voters.entry((collection, doc_id, caller)).read(), 'Already voted on this document');
+
             self.document_voters.entry((collection, doc_id, caller)).write(true);
             if is_valid { doc.positive_votes += 1; } else { doc.negative_votes += 1; }
             doc.total_voters += 1;
+            let positive_votes = doc.positive_votes;
+            let negative_votes = doc.negative_votes;
+            let creator = doc.creator;
+
             self.documents.entry((collection, doc_id)).write(doc);
             let current_points = self.points.entry(caller).read();
             let new_points = current_points + VOTE_REWARD_POINTS.try_into().unwrap();
@@ -1231,10 +1259,10 @@ mod GurftronDB {
                 voter: caller, 
                 collection, 
                 document_id: doc_id,
-                creator: doc.creator,
+                creator: creator,
                 is_valid,
-                positive_votes: doc.positive_votes,
-                negative_votes: doc.negative_votes,
+                positive_votes: positive_votes,
+                negative_votes: negative_votes,
                 timestamp: get_block_timestamp()
             });
             self._check_validation_consensus(collection, doc_id);
@@ -1553,7 +1581,12 @@ mod GurftronDB {
             let mut profile = self.user_profiles.entry(user).read();
             profile.reputation_score -= 100;
             profile.warning_count += 1;
+
+            let old_reputation = profile.reputation_score + 100;
+            let reputation_score = profile.reputation_score;
+
             self.user_profiles.entry(user).write(profile);
+
             let total_slashed = self.total_slashed_stakes.read();
             self.total_slashed_stakes.write(total_slashed + amount);
             self.emit(StakeSlashedEvent { 
@@ -1565,8 +1598,8 @@ mod GurftronDB {
             });
             self.emit(ReputationChangedEvent { 
                 user, 
-                old_reputation: profile.reputation_score + 100, 
-                new_reputation: profile.reputation_score,
+                old_reputation: old_reputation, 
+                new_reputation: reputation_score,
                 reason: 'stake_slashed',
                 timestamp: get_block_timestamp()
             });
@@ -1642,8 +1675,10 @@ mod GurftronDB {
         assert(!self.banned_users.entry(caller).read(), 'User is banned');
         assert(!self.is_circuit_breaker_active.read(), 'System maintenance mode');
         let profile = self.user_profiles.entry(caller).read();
+
         let old_reputation = profile.reputation_score;
         let warning_count = profile.warning_count;
+
         assert(old_reputation >= 0, 'Reputation too low for claims');
         assert(warning_count < 5, 'Too many warnings');
         
@@ -1676,6 +1711,7 @@ mod GurftronDB {
         self.points.entry(caller).write(0);
         let mut updated_profile = profile;
         updated_profile.reputation_score += 5;
+        let reputation_score = updated_profile.reputation_score;
         self.user_profiles.entry(caller).write(updated_profile);
         
         self.emit(RewardClaimedEvent {
@@ -1688,7 +1724,7 @@ mod GurftronDB {
         self.emit(ReputationChangedEvent { 
             user: caller, 
             old_reputation, 
-            new_reputation: updated_profile.reputation_score,
+            new_reputation: reputation_score,
             reason: 'reward_claimed',
             timestamp: get_block_timestamp()
         });
@@ -1844,11 +1880,14 @@ mod GurftronDB {
     impl InternalImpl of InternalTrait {
         fn _compute_data_hash(self: @ContractState, data: @ByteArray) -> felt252 {
             let mut state = PoseidonTrait::new();
-            state = state.update(data.len());
+            let data_len: u32 = data.len();
+            state = state.update(data_len);
 
-            let mut i = 0;
-            while i < data.len() {
-                state = state.update(data.at(i).unwrap().into());
+            let mut i: u32 = 0;
+            while i < data_len {
+                let byte_option = data.at(i);
+                let byte_val: u8 = byte_option.unwrap();
+                state = state.update(byte_val.into());
                 i += 1;
             }
 
@@ -1930,6 +1969,7 @@ mod GurftronDB {
             let mut creator_profile = self.user_profiles.entry(creator).read();
             let old_reputation = creator_profile.reputation_score;
             creator_profile.reputation_score += 10;
+            let new_reputation = creator_profile.reputation_score;
             creator_profile.approved_documents += 1;
             self.user_profiles.entry(creator).write(creator_profile);
 
@@ -1944,7 +1984,7 @@ mod GurftronDB {
             self.emit(ReputationChangedEvent { 
                 user: creator, 
                 old_reputation, 
-                new_reputation: creator_profile.reputation_score,
+                new_reputation: new_reputation,
                 reason: 'document_approved',
                 timestamp
             });
@@ -1967,14 +2007,16 @@ mod GurftronDB {
             };
             creator_profile.reputation_score = new_reputation;
             creator_profile.warning_count += 1;
+            let real_warning = creator_profile.warning_count;
             self.user_profiles.entry(creator).write(creator_profile);
 
-            if creator_profile.warning_count >= 3 {
+            if real_warning >= 3 {
                 let mut stake_info = self.user_stakes.entry(creator).read();
                 let slash_amount = (stake_info.amount * SLASH_PERCENTAGE.into()) / 100;
                 stake_info.amount -= slash_amount;
                 stake_info.is_locked = true;
                 self.user_stakes.entry(creator).write(stake_info);
+
                 let total_slashed = self.total_slashed_stakes.read();
                 self.total_slashed_stakes.write(total_slashed + slash_amount);
                 self.emit(StakeSlashedEvent { 
@@ -2307,7 +2349,7 @@ mod GurftronDB {
         fn _cleanup_document(ref self: ContractState, collection: felt252, id: felt252) {
             let empty_doc = Document {
                 compressed_data: ByteArray::from(""),
-                creator: ContractAddress::from(0_felt252),
+                creator: contract_address_const::<0>(),
                 created_at: 0,
                 updated_at: 0,
                 data_hash: 0,
@@ -2324,7 +2366,7 @@ mod GurftronDB {
             self.documents.entry((collection, id)).write(empty_doc);
             
             // Reset creator address
-            let zero_addr = ContractAddress::from(0_felt252);
+            let zero_addr = contract_address_const::<0>();
             self.creators.entry((collection, id)).write(zero_addr);
             
             // Reset field length
@@ -2444,7 +2486,11 @@ mod GurftronDB {
                     let b: u256 = value.try_into().unwrap_or(0_u256);
                     a > b
                 },
-                'lt' => actual < value,
+                'lt' => {
+                    let actual_u256: u256 = actual.try_into().unwrap_or(0_u256);
+                    let value_u256: u256 = value.try_into().unwrap_or(0_u256);
+                    actual_u256 < value_u256
+                },
                 'gte' => actual >= value,
                 'lte' => actual <= value,
                 'exists' => {
@@ -2609,10 +2655,14 @@ mod GurftronDB {
     fn get_user_voting_stats(self: @ContractState, user: ContractAddress) -> (u32, i32, u32) {
         let profile = self.user_profiles.entry(user).read();
         let stake_info = self.user_stakes.entry(user).read();
-        let vote_power = if stake_info.amount >= self.minimum_stake_amount.read() { 
-            if profile.reputation_score > 100 { 2 } else { 1 }
-        } else { 0 };
-        (profile.total_votes_cast, profile.reputation_score, vote_power)
+        
+        let total_votes_cast = profile.total_votes_cast;
+        let reputation_score = profile.reputation_score;
+        let stake_info_amount = stake_info.amount;
+        
+        let vote_power = if stake_info_amount >= self.minimum_stake_amount.read() { 2 } else { 1 };
+        
+        (total_votes_cast, reputation_score, vote_power)
     }
 
     #[external(v0)]
@@ -2621,13 +2671,7 @@ mod GurftronDB {
         let has_already_voted = self.document_voters.entry((collection, doc_id, user)).read();
         let stake_info = self.user_stakes.entry(user).read();
         let profile = self.user_profiles.entry(user).read();
-        !doc.creator.is_zero() &&
-        doc.validation_status == 'pending' &&
-        doc.creator != user &&
-        !has_already_voted &&
-        stake_info.amount >= self.minimum_stake_amount.read() &&
-        profile.reputation_score >= self.minimum_reputation_score.read() &&
-        !self.banned_users.entry(user).read() &&
-        !self.is_circuit_breaker_active.read()
+
+        !doc.creator.is_zero() && doc.validation_status == 'pending' && doc.creator != user && !has_already_voted && stake_info.amount >= self.minimum_stake_amount.read() && profile.reputation_score >= self.minimum_reputation_score.read() && !self.banned_users.entry(user).read() && !self.is_circuit_breaker_active.read()
     }
 }
