@@ -1,11 +1,10 @@
 // g_utils - Utility library for Starknet/Cairo
 // Author: Adeyeye George
-// Version: 1.0.0
+// Version: 1.0.1 (fixed)
 // Contact: manomitehq@gmail.com
 // License: MIT
 
-use starknet::{ContractAddress, contract_address_const};
-use starknet::storage::{Map, StoragePathEntry, Vec, VecTrait};
+use starknet::ContractAddress;
 
 // Trait for resetting values to their "null" state
 trait GResettable<T> {
@@ -15,68 +14,66 @@ trait GResettable<T> {
 
 // Implementations for resetting standard Cairo types
 impl Felt252GResettable of GResettable<felt252> {
-    fn g_reset(ref self: felt252) -> felt252 { 0 } // Resets to 0
+    fn g_reset(ref self: felt252) -> felt252 { 0 }
 }
 
 impl U8GResettable of GResettable<u8> {
-    fn g_reset(ref self: u8) -> u8 { 0 } // Resets to 0
+    fn g_reset(ref self: u8) -> u8 { 0 }
 }
 
 impl U16GResettable of GResettable<u16> {
-    fn g_reset(ref self: u16) -> u16 { 0 } // Resets to 0
+    fn g_reset(ref self: u16) -> u16 { 0 }
 }
 
 impl U32GResettable of GResettable<u32> {
-    fn g_reset(ref self: u32) -> u32 { 0 } // Resets to 0
+    fn g_reset(ref self: u32) -> u32 { 0 }
 }
 
 impl U64GResettable of GResettable<u64> {
-    fn g_reset(ref self: u64) -> u64 { 0 } // Resets to 0
+    fn g_reset(ref self: u64) -> u64 { 0 }
 }
 
 impl U128GResettable of GResettable<u128> {
-    fn g_reset(ref self: u128) -> u128 { 0 } // Resets to 0
+    fn g_reset(ref self: u128) -> u128 { 0 }
 }
 
 impl U256GResettable of GResettable<u256> {
-    fn g_reset(ref self: u256) -> u256 { 0 } // Resets to 0
+    fn g_reset(ref self: u256) -> u256 { 0 }
 }
 
 impl BoolGResettable of GResettable<bool> {
-    fn g_reset(ref self: bool) -> bool { false } // Resets to false
+    fn g_reset(ref self: bool) -> bool { false }
 }
 
 impl ByteArrayGResettable of GResettable<ByteArray> {
-    fn g_reset(ref self: ByteArray) -> ByteArray { "" } // Resets to empty string
+    fn g_reset(ref self: ByteArray) -> ByteArray { "" }
 }
 
 impl ContractAddressGResettable of GResettable<ContractAddress> {
-    fn g_reset(ref self: ContractAddress) -> ContractAddress { contract_address_const::<0>() } // Resets to zero address
+    fn g_reset(ref self: ContractAddress) -> ContractAddress {
+        ContractAddress::from_felt252(0)
+    }
 }
 
 impl OptionGResettable<T, impl TGResettable: GResettable<T>, impl TDrop: Drop<T>> of GResettable<Option<T>> {
-    fn g_reset(ref self: Option<T>) -> Option<T> { Option::None } // Resets to None
+    fn g_reset(ref self: Option<T>) -> Option<T> { Option::None }
 }
-
-// Note: Vec reset implementation removed due to API incompatibility
-// Storage Vec doesn't have a simple new() constructor in this context
 
 impl ArrayGResettable<T, impl TDrop: Drop<T>> of GResettable<Array<T>> {
-    fn g_reset(ref self: Array<T>) -> Array<T> { array![] } // Resets to empty Array
+    fn g_reset(ref self: Array<T>) -> Array<T> { array![] }
 }
 
-// Note: Map reset implementation removed as it has structural issues
-// Maps in Cairo storage don't work the way this implementation assumes
+// Note: Vec and Map reset implementations are omitted due to storage API constraints
 
-// Assert function with ByteArray error messages for flexible error handling
+// Assert function with ByteArray error messages (no 31-char limit!)
 fn g_assert(condition: bool, error_message: ByteArray) {
     if !condition {
-        core::panic_with_felt252(0); // Use panic_with_felt252 instead
+        panic!(error_message);
     }
 }
 
 // Dynamic typing system for flexible type conversions
-#[derive(Drop, Serde, Copy)]
+#[derive(Drop, Serde)]
 enum g_convert {
     Felt252: felt252,
     U8: u8,
@@ -90,15 +87,11 @@ enum g_convert {
     ContractAddress: ContractAddress,
 }
 
-// Trait for type conversion, mimicking PHP's dynamic typing
+// Trait for type conversion, mimicking dynamic typing
 trait g_convertTrait {
-    // Creates a g_convert from any supported type
     fn new<T, impl TDrop: Drop<T>, impl TIntoDynamic: Into<T, g_convert>>(value: T) -> g_convert;
-    // Manual conversion to a specified type
     fn g_convert<T, impl TDrop: Drop<T>, impl TFromDynamic: TryInto<g_convert, T>>(self: g_convert) -> T;
-    // Auto-converts to a common type based on the other operand
     fn to(self: g_convert, other: g_convert) -> felt252;
-    // Converts to ByteArray for string operations
     fn to_string(self: g_convert) -> ByteArray;
 }
 
@@ -110,12 +103,11 @@ impl g_convertImpl of g_convertTrait {
     fn g_convert<T, impl TDrop: Drop<T>, impl TFromDynamic: TryInto<g_convert, T>>(self: g_convert) -> T {
         match self.try_into() {
             Option::Some(value) => value,
-            Option::None => core::panic_with_felt252(1), // Simplified error handling
+            Option::None => panic!("g_convert: type conversion failed"),
         }
     }
 
     fn to(self: g_convert, other: g_convert) -> felt252 {
-        // Simplified conversion logic
         match self {
             g_convert::Felt252(v) => v,
             g_convert::U8(v) => v.into(),
@@ -123,14 +115,12 @@ impl g_convertImpl of g_convertTrait {
             g_convert::U32(v) => v.into(),
             g_convert::U64(v) => v.into(),
             g_convert::U128(v) => v.into(),
-            g_convert::U256(v) => {
-                match v.try_into() {
-                    Option::Some(felt_val) => felt_val,
-                    Option::None => 0,
-                }
+            g_convert::U256(v) => match v.try_into() {
+                Option::Some(felt_val) => felt_val,
+                Option::None => 0,
             },
             g_convert::Bool(v) => if v { 1 } else { 0 },
-            _ => 0, // Default fallback
+            _ => 0,
         }
     }
 
@@ -150,7 +140,7 @@ impl g_convertImpl of g_convertTrait {
     }
 }
 
-// Conversions to g_convert
+// Conversions TO g_convert
 impl Felt252IntoDynamic of Into<felt252, g_convert> {
     fn into(self: felt252) -> g_convert { g_convert::Felt252(self) }
 }
@@ -191,7 +181,7 @@ impl ContractAddressIntoDynamic of Into<ContractAddress, g_convert> {
     fn into(self: ContractAddress) -> g_convert { g_convert::ContractAddress(self) }
 }
 
-// Conversions from g_convert
+// Conversions FROM g_convert
 impl Felt252FromDynamic of TryInto<g_convert, felt252> {
     fn try_into(self: g_convert) -> Option<felt252> {
         match self {
@@ -323,3 +313,5 @@ impl ContractAddressFromDynamic of TryInto<g_convert, ContractAddress> {
         }
     }
 }
+#[cfg(test)]
+mod tests;
