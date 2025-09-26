@@ -2356,13 +2356,12 @@ mod GurftronDB {
 
         fn _cleanup_document(ref self: ContractState, collection: felt252, id: felt252) {
 
-            let ba: ByteArray = "unknown";
-            let byte = ba.at(0).unwrap();
 
 
-
+            let empty = ByteArray { data: array![] };
+           
             let empty_doc = Document {
-                compressed_data: byte,
+                compressed_data: empty,
                 creator: contract_address_const::<0>(),
                 created_at: 0,
                 updated_at: 0,
@@ -2384,7 +2383,7 @@ mod GurftronDB {
             self.creators.entry((collection, id)).write(zero_addr);
             
             // Reset field length
-            let zero_len = ByteArray::new();
+            let zero_len = empty;
             self.field_lengths.entry((collection, id)).write(zero_len);
 
             let num = self.num_docs.entry(collection).read();
