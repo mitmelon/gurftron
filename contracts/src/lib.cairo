@@ -2193,8 +2193,8 @@ mod GurftronDB {
 
             let creator = doc.creator;
             let data_hash = doc.data_hash;
-            let whitelist_remove_votes = doc.whitelist_remove_votes;
-            let whitelist_total_voters = doc.whitelist_total_voters; 
+            let whitelist_remove_vote = doc.whitelist_remove_votes;
+            let whitelist_total_voter = doc.whitelist_total_voters; 
 
             let total_users = self.total_accounts_registered.read();
             if total_users == 0 {
@@ -2213,8 +2213,8 @@ mod GurftronDB {
                     document_id: doc_id,
                     creator: creator,
                     data_hash: data_hash,
-                    remove_votes: whitelist_remove_votes,
-                    total_votes: whitelist_total_voters,
+                    remove_votes: whitelist_remove_vote,
+                    total_votes: whitelist_total_voter,
                     timestamp: get_block_timestamp()
                 });
             }
