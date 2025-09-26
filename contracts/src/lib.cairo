@@ -617,6 +617,13 @@ mod GurftronDB {
     const TRANSACTION_FEE_PERCENT: u32 = 10;
     const MAX_INDEXED_FIELDS: u32 = 10;
 
+    const OP_EQ: felt252 = 'eq';
+    const OP_NE: felt252 = 'ne';
+    const OP_GT: felt252 = 'gt';
+    const OP_LT: felt252 = 'lt';
+    const OP_GTE: felt252 = 'gte';
+    const OP_LTE: felt252 = 'lte';
+
     #[storage]
     struct Storage {
         admin_address: ContractAddress,
@@ -2476,32 +2483,38 @@ mod GurftronDB {
             true
         }
 
-        fn _matches_condition(self: @ContractState, collection: felt252, id: felt252, field: felt252, op: felt252, value: felt252) -> bool {
+        fn _matches_condition(
+            self: @ContractState,
+            collection: felt252,
+            id: felt252,
+            field: felt252,
+            op: felt252,
+            value: felt252,
+        ) -> bool {
             let actual = self.fields_data.entry((collection, id, field)).read();
-            match op {
-                'eq' => actual == value,
-                'ne' => actual != value,
-                'gt' => {
-                    let a: u256 = actual.try_into().unwrap_or(0_u256);
-                    let b: u256 = value.try_into().unwrap_or(0_u256);
-                    a > b
-                },
-                'lt' => {
-                    let a: u256 = actual.try_into().unwrap_or(0_u256);
-                    let b: u256 = value.try_into().unwrap_or(0_u256);
-                    a < b
-                },
-                'gte' => {
-                    let a: u256 = actual.try_into().unwrap_or(0_u256);
-                    let b: u256 = value.try_into().unwrap_or(0_u256);
-                    a >= b
-                },
-                'lte' => {
-                    let a: u256 = actual.try_into().unwrap_or(0_u256);
-                    let b: u256 = value.try_into().unwrap_or(0_u256);
-                    a <= b
-                },
-                _ => false,
+
+            if op == OP_EQ {
+                actual == value
+            } else if op == OP_NE {
+                actual != value
+            } else if op == OP_GT {
+                let a: u256 = actual.try_into().unwrap_or(0_u256);
+                let b: u256 = value.try_into().unwrap_or(0_u256);
+                a > b
+            } else if op == OP_LT {
+                let a: u256 = actual.try_into().unwrap_or(0_u256);
+                let b: u256 = value.try_into().unwrap_or(0_u256);
+                a < b
+            } else if op == OP_GTE {
+                let a: u256 = actual.try_into().unwrap_or(0_u256);
+                let b: u256 = value.try_into().unwrap_or(0_u256);
+                a >= b
+            } else if op == OP_LTE {
+                let a: u256 = actual.try_into().unwrap_or(0_u256);
+                let b: u256 = value.try_into().unwrap_or(0_u256);
+                a <= b
+            } else {
+                false
             }
         }
 
