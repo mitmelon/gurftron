@@ -1,5 +1,4 @@
 use starknet::{ContractAddress, get_caller_address, get_block_timestamp, get_contract_address};
-use starknet::contract::ContractDispatcherTrait;
 use core::byte_array::ByteArray;
 use core::traits::{TryInto, Into};
 use core::clone::Clone;
@@ -46,8 +45,8 @@ trait IDatabase<TContractState> {
     fn update(ref self: TContractState, collection: felt252, id: felt252, compressed_data: ByteArray, fields: Array<(felt252, felt252)>);
     fn delete(ref self: TContractState, collection: felt252, id: felt252);
     // Query Operations (Enhanced to filter approved data)
-    fn find(self: @TContractState, collection: felt252, query: Array<(felt252, felt252, felt252, felt252)>, page: u32) -> Array<felt252>;
-    fn find_one(self: @TContractState, collection: felt252, query: Array<(felt252, felt252, felt252, felt252)>) -> (ByteArray, Array<(felt252, felt252)>);
+    fn find(ref self: @TContractState, collection: felt252, query: Array<(felt252, felt252, felt252, felt252)>, page: u32) -> Array<felt252>;
+    fn find_one(ref self: @TContractState, collection: felt252, query: Array<(felt252, felt252, felt252, felt252)>) -> (ByteArray, Array<(felt252, felt252)>);
     fn get_all_data(self: @TContractState, collection: felt252) -> Array<felt252>;
     // Admin-only query functions (includes pending data)
     fn admin_find(self: @TContractState, collection: felt252, query: Array<(felt252, felt252, felt252, felt252)>, page: u32) -> Array<felt252>;
@@ -1138,7 +1137,9 @@ mod GurftronDB {
         ) -> (ByteArray, Array<(felt252, felt252)>) {
             let ids = self.find(collection, query, 1);
             if ids.len() == 0 {
-                return (ByteArray { data: ArrayTrait::new() }, ArrayTrait::new());
+                let empty_str = ByteArrayGResettable::g_reset("dummy");
+                let empty_arr = ArrayGResettable::g_reset(array![("dummy", "dummy")]);
+                return (empty_str, empty_arr);
             }
             let id = *ids.at(0);
             self.get(collection, id)
