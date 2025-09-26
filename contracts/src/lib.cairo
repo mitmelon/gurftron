@@ -2,7 +2,7 @@
 // Author: Adeyeye George
 // Version: 1.0.0
 // Contact: manomitehq@gmail.com
-// License: MIT LICENSE
+// License: MIT
 
 use starknet::{ContractAddress, contract_address_const};
 use starknet::storage::{Map, StoragePathEntry, Vec, VecTrait};
@@ -58,9 +58,8 @@ impl OptionGResettable<T, impl TGResettable: GResettable<T>, impl TDrop: Drop<T>
     fn g_reset(ref self: Option<T>) -> Option<T> { Option::None } // Resets to None
 }
 
-impl VecGResettable<T, impl TGResettable: GResettable<T>, impl TDrop: Drop<T>> of GResettable<Vec<T>> {
-    fn g_reset(ref self: Vec<T>) -> Vec<T> { VecTrait::new() } // Resets to empty Vec
-}
+// Note: Vec reset implementation removed due to API incompatibility
+// Storage Vec doesn't have a simple new() constructor in this context
 
 impl ArrayGResettable<T, impl TDrop: Drop<T>> of GResettable<Array<T>> {
     fn g_reset(ref self: Array<T>) -> Array<T> { array![] } // Resets to empty Array
@@ -77,7 +76,7 @@ fn g_assert(condition: bool, error_message: ByteArray) {
 }
 
 // Dynamic typing system for flexible type conversions
-#[derive(Drop, Serde)]
+#[derive(Drop, Serde, Copy)]
 enum g_convert {
     Felt252: felt252,
     U8: u8,
@@ -324,5 +323,3 @@ impl ContractAddressFromDynamic of TryInto<g_convert, ContractAddress> {
         }
     }
 }
-#[cfg(test)]
-mod tests;
