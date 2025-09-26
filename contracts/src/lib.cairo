@@ -2188,21 +2188,26 @@ mod GurftronDB {
         }
 
         fn _check_whitelist_consensus(ref self: ContractState, collection: felt252, doc_id: felt252) {
-            let mut doc = self.documents.entry((collection, doc_id)).read();
+            let mut doc_entry = self.documents.entry((collection, doc_id)); 
+            let mut doc = doc_entry.read(); 
+
             let total_users = self.total_accounts_registered.read();
             if total_users == 0 {
                 return;
             }
             let total_u32: u32 = total_users.try_into().unwrap();
             let required_votes = (total_u32 * APPROVAL_PERCENTAGE) / 100;
+            
             if doc.whitelist_remove_votes >= required_votes {
                 doc.whitelist_approved_for_deletion = true;
+                
                 let creator = doc.creator;
                 let data_hash = doc.data_hash;
                 let whitelist_remove_votes = doc.whitelist_remove_votes;
                 let whitelist_total_voters = doc.whitelist_total_voters;
 
-                self.documents.entry((collection, doc_id)).write(doc);
+                doc_entry.write(doc); 
+
                 self.emit(DocumentWhitelistApproved {
                     collection,
                     document_id: doc_id,
