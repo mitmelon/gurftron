@@ -538,6 +538,9 @@ mod GurftronDB {
     use core::starknet::storage::{Map, StoragePathEntry, StoragePointerReadAccess, StoragePointerWriteAccess};
     use core::num::traits::Zero;
     use core::hash::Poseidon;
+
+    #[feature("deprecated-starknet-consts")]
+    mod g_utils;
     use g_utils::{
         ContractAddressGResettable,
         Felt252GResettable,
