@@ -2491,8 +2491,16 @@ mod GurftronDB {
                     let value_u256: u256 = value.try_into().unwrap_or(0_u256);
                     actual_u256 < value_u256
                 },
-                'gte' => actual >= value,
-                'lte' => actual <= value,
+                'gte' => {
+                    let actual_u256: u256 = actual.try_into().unwrap_or(0_u256);
+                    let value_u256: u256 = value.try_into().unwrap_or(0_u256);
+                    actual_u256 >= value_u256
+                },
+                'lte' => {
+                    let actual_u256: u256 = actual.try_into().unwrap_or(0_u256);
+                    let value_u256: u256 = value.try_into().unwrap_or(0_u256);
+                    actual_u256 <= value_u256
+                },
                 'exists' => {
                     let len = self.field_lengths.entry((collection, id)).read();
                     let mut found = false;
