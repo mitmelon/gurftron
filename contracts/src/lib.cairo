@@ -1,3 +1,5 @@
+use starknet::{ContractAddress, get_caller_address, get_block_timestamp, get_contract_address};
+
 /// @title IERC20 Interface for STRK token interactions
 /// @notice Interface for ERC20 token operations required by the contract
 #[starknet::interface]
@@ -529,7 +531,6 @@ mod GurftronDB {
         // Storage structures
         Document, StakeInfo, UserProfile, MaliciousReport
     };
-    use starknet::{ContractAddress, get_caller_address, get_block_timestamp, get_contract_address};
     use starknet::storage::{Map, StoragePathEntry, StoragePointerReadAccess, StoragePointerWriteAccess};
 
     use core::byte_array::ByteArray;
