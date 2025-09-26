@@ -1,5 +1,4 @@
 use starknet::{ContractAddress, get_caller_address, get_block_timestamp, get_contract_address};
-use core::byte_array::ByteArray;
 
 /// @title IERC20 Interface for STRK token interactions
 /// @notice Interface for ERC20 token operations required by the contract
@@ -533,7 +532,8 @@ mod GurftronDB {
         Document, StakeInfo, UserProfile, MaliciousReport
     };
     use core::starknet::storage::{Map, StoragePathEntry, StoragePointerReadAccess, StoragePointerWriteAccess};
-    use starknet::hash::{PoseidonHasher, Hasher};
+    use starknet::ByteArray;
+    use core::poseidon::PoseidonTrait;
     use core::num::traits::Zero;
 
     trait ModifierTrait {
@@ -1843,14 +1843,16 @@ mod GurftronDB {
 
     impl InternalImpl of InternalTrait {
         fn _compute_data_hash(self: @ContractState, data: @ByteArray) -> felt252 {
-            let mut hasher = PoseidonHasher::new();
-            hasher.write(data.len().into());
-            let mut i: usize = 0;
+            let mut state = PoseidonTrait::new();
+            state = state.update(data.len());
+
+            let mut i = 0;
             while i < data.len() {
-                hasher.write(data.at(i).unwrap().into());
+                state = state.update(data.at(i).unwrap().into());
                 i += 1;
             }
-            hasher.finalize()
+
+            state.finalize()
         }
 
         fn enforce_cooldown(ref self: ContractState, action_type: felt252) {
