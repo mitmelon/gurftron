@@ -97,7 +97,7 @@ impl g_convertImpl of g_convertTrait {
     fn g_convert<T, impl TDrop: Drop<T>, impl TFromDynamic: TryInto<g_convert, T>>(self: g_convert) -> T {
         match self.try_into() {
             Option::Some(value) => value,
-            Option::None => panic_with_felt252('conversion_failed'),
+            Option::None => panic!("g_convert: type conversion failed"),
         }
     }
 
