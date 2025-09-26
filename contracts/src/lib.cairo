@@ -2203,7 +2203,7 @@ mod GurftronDB {
             let total_u32: u32 = total_users.try_into().unwrap();
             let required_votes = (total_u32 * APPROVAL_PERCENTAGE) / 100;
             
-            if whitelist_remove_votes >= required_votes {
+            if whitelist_remove_vote >= required_votes {
                 doc.whitelist_approved_for_deletion = true;
 
                 self.documents.entry((collection, doc_id)).write(doc);
