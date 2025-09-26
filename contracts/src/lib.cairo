@@ -1,6 +1,5 @@
 use starknet::{ContractAddress, get_caller_address, get_block_timestamp, get_contract_address};
 use core::byte_array::ByteArray;
-use starknet::hash::Poseidon;
 
 /// @title IERC20 Interface for STRK token interactions
 /// @notice Interface for ERC20 token operations required by the contract
@@ -533,8 +532,8 @@ mod GurftronDB {
         // Storage structures
         Document, StakeInfo, UserProfile, MaliciousReport
     };
-    use starknet::contract_address_const;
-    use core::starknet::storage::{Map, StoragePathEntry, StoragePointerReadAccess, StoragePointerWriteAccess};
+    use starknet::storage::Map;
+    use starknet::hash::{PoseidonHasher, Hasher};
     use core::num::traits::Zero;
 
     trait ModifierTrait {
@@ -1700,7 +1699,7 @@ mod GurftronDB {
     }
 
     #[external(v0)]
-    fn get_points(self: @ContractState, account: ContractAddress) -> i32 {
+    fn get_points(self: @ContractState, account: ContractAddress) -> u32 {
         self.points.entry(account).read()
     }
 
@@ -1844,12 +1843,14 @@ mod GurftronDB {
 
     impl InternalImpl of InternalTrait {
         fn _compute_data_hash(self: @ContractState, data: @ByteArray) -> felt252 {
-            let mut state = Poseidon::new();
-            state.write(data.len().into());
-            if data.len() > 0 {
-                state.write(data.at(0).unwrap().into());
+            let mut hasher = PoseidonHasher::new();
+            hasher.write(data.len().into());
+            let mut i: usize = 0;
+            while i < data.len() {
+                hasher.write(data.at(i).unwrap().into());
+                i += 1;
             }
-            state.finalize()
+            hasher.finalize()
         }
 
         fn enforce_cooldown(ref self: ContractState, action_type: felt252) {
@@ -2303,8 +2304,8 @@ mod GurftronDB {
 
         fn _cleanup_document(ref self: ContractState, collection: felt252, id: felt252) {
             let empty_doc = Document {
-                compressed_data: "".into(),
-                creator: contract_address_const::<0>(),
+                compressed_data: ByteArray::from(""),
+                creator: ContractAddress::from(0_felt252),
                 created_at: 0,
                 updated_at: 0,
                 data_hash: 0,
@@ -2321,7 +2322,7 @@ mod GurftronDB {
             self.documents.entry((collection, id)).write(empty_doc);
             
             // Reset creator address
-            let zero_addr = contract_address_const::<0>();
+            let zero_addr = ContractAddress::from(0_felt252);
             self.creators.entry((collection, id)).write(zero_addr);
             
             // Reset field length
@@ -2436,7 +2437,11 @@ mod GurftronDB {
             match op {
                 'eq' => actual == value,
                 'ne' => actual != value,
-                'gt' => actual > value,
+                'gt' => {
+                    let a: u256 = actual.try_into().unwrap_or(0_u256);
+                    let b: u256 = value.try_into().unwrap_or(0_u256);
+                    a > b
+                },
                 'lt' => actual < value,
                 'gte' => actual >= value,
                 'lte' => actual <= value,
