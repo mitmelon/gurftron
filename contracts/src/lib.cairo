@@ -2189,7 +2189,7 @@ mod GurftronDB {
         }
 
         fn _check_whitelist_consensus(ref self: ContractState, collection: felt252, doc_id: felt252) {
-            let mut doc = self.documents.entry((collection, doc_id)).read().clone();
+            let doc = self.documents.entry((collection, doc_id)).read();
 
             // Extract all needed values FIRST, before any mutations
             let creator = doc.creator;
@@ -2205,13 +2205,16 @@ mod GurftronDB {
             let required_votes = (total_u32 * APPROVAL_PERCENTAGE) / 100;
             
             if whitelist_remove_votes >= required_votes {
-                // Now modify the document
-                doc.whitelist_approved_for_deletion = true;
+                // Create a new document with the updated field
+                let updated_doc = Document {
+                    whitelist_approved_for_deletion: true,
+                    ..doc // Copy all other fields from the original
+                };
                 
                 // Write back the modified document
-                self.documents.entry((collection, doc_id)).write(doc);
+                self.documents.entry((collection, doc_id)).write(updated_doc);
 
-                // Emit event using the extracted values (not from the moved doc)
+                // Emit event using the extracted values
                 self.emit(DocumentWhitelistApproved {
                     collection,
                     document_id: doc_id,
