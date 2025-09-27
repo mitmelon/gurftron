@@ -2189,9 +2189,12 @@ mod GurftronDB {
         }
 
         fn _check_whitelist_consensus(ref self: ContractState, collection: felt252, doc_id: felt252) {
-            let mut doc_entry = self.documents.entry((collection, doc_id));
-            let doc_ref = doc_entry.read();
-            let mut doc = (*doc_ref).clone(); // Owned Document
+            let mut doc = self.documents.entry((collection, doc_id)).read().clone();
+
+            let creator = doc.creator;
+            let data_hash = doc.data_hash;
+            let whitelist_remove_vote = doc.whitelist_remove_votes;
+            let whitelist_total_voter = doc.whitelist_total_voters; 
 
             let total_users = self.total_accounts_registered.read();
             if total_users == 0 {
@@ -2199,25 +2202,20 @@ mod GurftronDB {
             }
             let total_u32: u32 = total_users.try_into().unwrap();
             let required_votes = (total_u32 * APPROVAL_PERCENTAGE) / 100;
-
-            let creator = doc.creator;
-            let data_hash = doc.data_hash;
-            let whitelist_remove_vote = doc.whitelist_remove_votes;
-            let whitelist_total_voter = doc.whitelist_total_voters;
-
+            
             if whitelist_remove_vote >= required_votes {
                 doc.whitelist_approved_for_deletion = true;
 
-                doc_entry.write(doc); // Now OK: `doc` is owned and not yet moved
+                self.documents.entry((collection, doc_id)).write(doc);
 
                 self.emit(DocumentWhitelistApproved {
                     collection,
                     document_id: doc_id,
-                    creator,
-                    data_hash,
+                    creator: creator,
+                    data_hash: data_hash,
                     remove_votes: whitelist_remove_vote,
                     total_votes: whitelist_total_voter,
-                    timestamp: get_block_timestamp(),
+                    timestamp: get_block_timestamp()
                 });
             }
         }
