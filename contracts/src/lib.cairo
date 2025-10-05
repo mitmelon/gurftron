@@ -64,231 +64,307 @@ trait IDatabase<TContractState> {
     fn get_total_database_size_bytes(self: @TContractState) -> u256;
     fn get_security_statistics(self: @TContractState) -> (u256, u64, u64, u64);
     // Admin Functions (Enhanced)
-    #[derive(Drop, starknet::Event)]
-    struct DocumentInsertedEvent {
-        #[key]
-        collection: felt252,
-        #[key]
-        document_id: felt252,
-        data_hash: felt252,
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct DocumentUpdatedEvent {
-        #[key]
-        collection: felt252,
-        #[key]
-        document_id: felt252,
-        old_data_hash: felt252,
-        new_data_hash: felt252,
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct DocumentDeletedEvent {
-        #[key]
-        collection: felt252,
-        #[key]
-        document_id: felt252,
-        data_hash: felt252,
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct DocumentApprovedEvent {
-        #[key]
-        collection: felt252,
-        #[key]
-        document_id: felt252,
-        positive_votes: u32,
-        total_votes: u32,
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct DocumentRejectedEvent {
-        #[key]
-        collection: felt252,
-        #[key]
-        document_id: felt252,
-        negative_votes: u32,
-        total_votes: u32,
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct DocumentVoteSubmitted {
-        #[key]
-        collection: felt252,
-        #[key]
-        document_id: felt252,
-        is_valid: bool,
-        positive_votes: u32,
-        negative_votes: u32,
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct WhitelistVoteSubmitted {
-        #[key]
-        collection: felt252,
-        #[key]
-        document_id: felt252,
-        vote_remove: bool,
-        remove_votes: u32,
-        keep_votes: u32,
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct DocumentWhitelistApproved {
-        #[key]
-        collection: felt252,
-        #[key]
-        document_id: felt252,
-        data_hash: felt252,
-        remove_votes: u32,
-        total_votes: u32,
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct PointsAwardedForApproval {
-        #[key]
-        collection: felt252,
-        #[key]
-        document_id: felt252,
-        points_awarded: u32,
-        total_points: u32,
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct PointsAwardedForVoting {
-        #[key]
-        collection: felt252,
-        #[key]
-        document_id: felt252,
-        points_awarded: u32,
-        total_points: u32,
-        vote_type: felt252, // 'approval' or 'whitelist'
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct BadgeEarnedEvent {
-        badge_id: u64,
-        points_threshold: u32,
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct RewardClaimedEvent {
-        reward_amount: u256,
-        points_used: u256,
-        is_premium_bonus: bool,
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct UserRegisteredEvent {
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct UserBannedEvent {
-        reason: felt252,
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct UserUnbannedEvent {
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct PremiumStatusChangedEvent {
-        is_premium: bool,
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct StakeDepositedEvent {
-        amount: u256,
-        unlock_time: u64,
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct StakeWithdrawnEvent {
-        amount: u256,
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct StakeSlashedEvent {
-        slashed_amount: u256,
-        reason: felt252,
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct CollectionCreatedEvent {
-        collection_name: felt252,
-        indexed_fields_count: u32,
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct FundsDepositedEvent {
-        amount: u256,
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct SystemPausedEvent {
-        reason: felt252,
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct SystemResumedEvent {
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct ReputationChangedEvent {
-        old_reputation: i32,
-        new_reputation: i32,
-        reason: felt252,
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct SecurityViolationEvent {
-        violation_type: felt252, // 'cooldown', 'rate_limit', 'reputation'
-        details: felt252,
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct CooldownViolation {
-        action_type: felt252,
-        last_action: u64,
-        current_time: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct RateLimitExceeded {
-        action_type: felt252,
-        current_count: u32,
-        max_allowed: u32,
-        hour_window: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct PointsDeducted {
-        points: u32,
-        total_points: u32,
-        action_type: felt252,
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct MaliciousDataReported {
-        #[key]
-        collection: felt252,
-        #[key]
-        doc_id: felt252,
-        reason: felt252,
-        report_id: felt252,
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct CircuitBreakerTriggered {
-        reason: felt252,
-        timestamp: u64,
-    }
-    #[derive(Drop, starknet::Event)]
-    struct PointsAwarded {
-        points: u32,
-        total_points: u32,
-        action_type: felt252,
-        timestamp: u64,
-    }
+    fn update_all_parameters(
+        ref self: TContractState,
+        new_points_per_insert: u32,
+        new_points_per_update: u32,
+        new_points_per_delete: u32,
+        new_points_per_query_page: u32,
+        new_points_threshold_for_claim: u32,
+        new_premium_reward_multiplier: u32,
+        new_badge_threshold: u32,
+        new_points_to_strk_wei: u256
+    );
+    fn update_security_parameters(
+        ref self: TContractState, 
+        min_stake: u256, 
+        stake_lock_period: u64, 
+        cooldown_period: u64, 
+        min_reputation: i32,
+        max_pending_time: u64,
+        approval_percentage: i32,
+        slash_percentage: i32,
+        transaction_fee_percent: i32
+    );
+    fn slash_malicious_stake(ref self: TContractState, user: ContractAddress, amount: u256, reason: felt252);
+    fn force_approve_document(ref self: TContractState, collection: felt252, doc_id: felt252);
+    fn force_reject_document(ref self: TContractState, collection: felt252, doc_id: felt252);
+    fn delete_whitelisted_document(ref self: TContractState, collection: felt252, doc_id: felt252);
+    fn cleanup_stale_pending_documents(ref self: TContractState);
+}
+
+// ==============
+// EVENTS
+// ==============
+
+#[derive(Drop, starknet::Event)]
+struct DocumentInsertedEvent {
+    #[key]
+    caller: ContractAddress,
+    #[key]
+    collection: felt252,
+    #[key]
+    document_id: felt252,
+    data_hash: felt252,
+    timestamp: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct DocumentUpdatedEvent {
+    #[key]
+    caller: ContractAddress,
+    #[key]
+    collection: felt252,
+    #[key]
+    document_id: felt252,
+    old_data_hash: felt252,
+    new_data_hash: felt252,
+    timestamp: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct DocumentDeletedEvent {
+    #[key]
+    caller: ContractAddress,
+    #[key]
+    collection: felt252,
+    #[key]
+    document_id: felt252,
+    data_hash: felt252,
+    creator: ContractAddress,
+    timestamp: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct DocumentApprovedEvent {
+    #[key]
+    collection: felt252,
+    #[key]
+    document_id: felt252,
+    #[key]
+    creator: ContractAddress,
+    positive_votes: u32,
+    total_votes: u32,
+    timestamp: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct DocumentRejectedEvent {
+    #[key]
+    collection: felt252,
+    #[key]
+    document_id: felt252,
+    #[key]
+    creator: ContractAddress,
+    negative_votes: u32,
+    total_votes: u32,
+    timestamp: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct DocumentVoteSubmitted {
+    #[key]
+    voter: ContractAddress,
+    #[key]
+    collection: felt252,
+    #[key]
+    document_id: felt252,
+    #[key]
+    creator: ContractAddress,
+    is_valid: bool,
+    positive_votes: u32,
+    negative_votes: u32,
+    timestamp: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct WhitelistVoteSubmitted {
+    #[key]
+    voter: ContractAddress,
+    #[key]
+    collection: felt252,
+    #[key]
+    document_id: felt252,
+    #[key]
+    creator: ContractAddress,
+    vote_remove: bool,
+    remove_votes: u32,
+    keep_votes: u32,
+    timestamp: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct DocumentWhitelistApproved {
+    #[key]
+    collection: felt252,
+    #[key]
+    document_id: felt252,
+    #[key]
+    creator: ContractAddress,
+    data_hash: felt252,
+    remove_votes: u32,
+    total_votes: u32,
+    timestamp: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct PointsAwardedForApproval {
+    #[key]
+    recipient: ContractAddress,
+    #[key]
+    collection: felt252,
+    #[key]
+    document_id: felt252,
+    points_awarded: u32,
+    total_points: u32,
+    timestamp: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct PointsAwardedForVoting {
+    #[key]
+    voter: ContractAddress,
+    #[key]
+    collection: felt252,
+    #[key]
+    document_id: felt252,
+    points_awarded: u32,
+    total_points: u32,
+    vote_type: felt252, // 'approval' or 'whitelist'
+    timestamp: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct BadgeEarnedEvent {
+    #[key]
+    recipient: ContractAddress,
+    badge_id: u64,
+    points_threshold: u32,
+    timestamp: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct RewardClaimedEvent {
+    #[key]
+    claimant: ContractAddress,
+    reward_amount: u256,
+    points_used: u256,
+    is_premium_bonus: bool,
+    timestamp: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct UserRegisteredEvent {
+    #[key]
+    new_user: ContractAddress,
+    registration_timestamp: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct UserBannedEvent {
+    #[key]
+    banned_user: ContractAddress,
+    #[key]
+    admin: ContractAddress,
+    reason: felt252,
+    timestamp: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct UserUnbannedEvent {
+    #[key]
+    unbanned_user: ContractAddress,
+    #[key]
+    admin: ContractAddress,
+    timestamp: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct PremiumStatusChangedEvent {
+    #[key]
+    user: ContractAddress,
+    #[key]
+    admin: ContractAddress,
+    is_premium: bool,
+    timestamp: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct StakeDepositedEvent {
+    #[key]
+    staker: ContractAddress,
+    amount: u256,
+    unlock_time: u64,
+    timestamp: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct StakeWithdrawnEvent {
+    #[key]
+    staker: ContractAddress,
+    amount: u256,
+    timestamp: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct StakeSlashedEvent {
+    #[key]
+    penalized_user: ContractAddress,
+    #[key]
+    admin: ContractAddress,
+    slashed_amount: u256,
+    reason: felt252,
+    timestamp: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct CollectionCreatedEvent {
+    #[key]
+    creator: ContractAddress,
+    collection_name: felt252,
+    indexed_fields_count: u32,
+    timestamp: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct FundsDepositedEvent {
+    #[key]
+    admin: ContractAddress,
+    amount: u256,
+    timestamp: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct SystemPausedEvent {
+    #[key]
+    admin: ContractAddress,
+    reason: felt252,
+    timestamp: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct SystemResumedEvent {
+    #[key]
+    admin: ContractAddress,
+    timestamp: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct ReputationChangedEvent {
+    #[key]
+    user: ContractAddress,
+    old_reputation: i32,
+    new_reputation: i32,
+    reason: felt252,
+    timestamp: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct SecurityViolationEvent {
+    #[key]
+    violator: ContractAddress,
+    violation_type: felt252, // 'cooldown', 'rate_limit', 'reputation'
+    details: felt252,
+    timestamp: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct CooldownViolation {
+    #[key]
+    user: ContractAddress,
+    action_type: felt252,
+    last_action: u64,
+    current_time: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct RateLimitExceeded {
+    #[key]
+    user: ContractAddress,
+    action_type: felt252,
+    current_count: u32,
+    max_allowed: u32,
+    hour_window: u64,
+}
+#[derive(Drop, starknet::Event)]
+struct PointsDeducted {
+    #[key]
+    account: ContractAddress,
+    points: u32,
     total_points: u32,
     action_type: felt252,
     timestamp: u64,
@@ -330,7 +406,11 @@ struct AccountRegistered {
 }
 #[derive(Drop, starknet::Event)]
 struct PremiumStatusSet {
+    #[key]
+    account: ContractAddress,
     is_premium: bool,
+    #[key]
+    admin: ContractAddress,
     timestamp: u64,
 }
 #[derive(Drop, starknet::Event)]
@@ -339,6 +419,7 @@ struct DocumentStatusChanged {
     collection: felt252,
     #[key]
     doc_id: felt252,
+    creator: ContractAddress,
     old_status: felt252,
     new_status: felt252,
     timestamp: u64,
@@ -352,6 +433,8 @@ struct StatisticsUpdated {
 }
 #[derive(Drop, starknet::Event)]
 struct ParametersUpdated {
+    #[key]
+    admin: ContractAddress,
     new_points_per_insert: u32,
     new_points_per_update: u32,
     new_points_per_delete: u32,
@@ -364,6 +447,8 @@ struct ParametersUpdated {
 }
 #[derive(Drop, starknet::Event)]
 struct SecurityParametersUpdated {
+    #[key]
+    admin: ContractAddress,
     min_stake: u256,
     stake_lock_period: u64,
     cooldown_period: u64,
@@ -733,7 +818,7 @@ mod GurftronDB {
         let contract_addr = get_contract_address();
         let success = strk_token.transfer_from(caller, contract_addr, amount);
         assert(success, 'Transfer failed');
-    self.emit(FundsDepositedEvent { amount, timestamp: get_block_timestamp() });
+        self.emit(FundsDepositedEvent { admin: caller, amount, timestamp: get_block_timestamp() });
     }
 
     #[external(v0)]
@@ -742,7 +827,7 @@ mod GurftronDB {
         assert(!user_address.is_zero(), 'Invalid user address');
         let caller = get_caller_address();
         self.is_user_premium.entry(user_address).write(is_premium);
-    self.emit(PremiumStatusSet { is_premium, timestamp: get_block_timestamp() });
+        self.emit(PremiumStatusSet { account: user_address, is_premium, admin: caller, timestamp: get_block_timestamp() });
     }
 
     #[external(v0)]
@@ -750,7 +835,7 @@ mod GurftronDB {
         self.only_admin();
         let caller = get_caller_address();
         self.is_circuit_breaker_active.write(true);
-    self.emit(CircuitBreakerTriggered { reason, timestamp: get_block_timestamp() });
+        self.emit(CircuitBreakerTriggered { admin: caller, reason, timestamp: get_block_timestamp() });
     }
 
     #[external(v0)]
@@ -793,6 +878,7 @@ mod GurftronDB {
             };
             self.user_stakes.entry(caller).write(stake_info);
             self.emit(StakeDepositedEvent { 
+                staker: caller, 
                 amount: total_stake, 
                 unlock_time: current_time + lock_period,
                 timestamp: current_time
@@ -817,6 +903,7 @@ mod GurftronDB {
             let success = strk_token.transfer(caller, amount);
             assert(success, 'Withdraw transfer failed');
             self.emit(StakeWithdrawnEvent { 
+                staker: caller, 
                 amount, 
                 timestamp: current_time 
             });
@@ -844,19 +931,20 @@ mod GurftronDB {
             self.only_staked_users();
             self.check_reputation();
             self.enforce_cooldown('create_collection');
-            assert(name != 0, 'Collection name is empty');
-            assert(indexed_fields.len() <= MAX_INDEXED_FIELDS, 'Too many indexed');
+            assert(name != 0, 'Collection name cannot be empty');
+            assert(indexed_fields.len() <= MAX_INDEXED_FIELDS, 'Too many indexed fields');
             let caller = get_caller_address();
             let len: u32 = indexed_fields.len();
             self.num_indexed.entry(name).write(len);
             let mut i: u32 = 0;
             while i < len {
                 let field = *indexed_fields.at(i);
-                assert(field != 0, 'Field name is empty');
+                assert(field != 0, 'Field name cannot be empty');
                 self.indexed_fields.entry((name, i)).write(field);
                 i += 1;
             }
             self.emit(CollectionCreatedEvent { 
+                creator: caller, 
                 collection_name: name, 
                 indexed_fields_count: len,
                 timestamp: get_block_timestamp()
@@ -876,7 +964,7 @@ mod GurftronDB {
             self.enforce_rate_limit('insert', MAX_INSERTS_PER_HOUR);
             self.validate_fields(@fields);
             self.validate_data(@compressed_data);
-            assert(collection != 0, 'Collection is empty');
+            assert(collection != 0, 'Collection name cannot be empty');
             
             let caller = get_caller_address();
             let timestamp = get_block_timestamp();
@@ -923,6 +1011,7 @@ mod GurftronDB {
             self._update_insert_statistics(data_ref);
             
             self.emit(DocumentInsertedEvent { 
+                caller, 
                 collection, 
                 document_id: id, 
                 data_hash,
@@ -1000,6 +1089,7 @@ mod GurftronDB {
             self._update_size_statistics(old_size, new_size);
             
             self.emit(DocumentUpdatedEvent { 
+                caller, 
                 collection, 
                 document_id: id, 
                 old_data_hash: old_doc.data_hash,
@@ -1038,9 +1128,11 @@ mod GurftronDB {
             self._decrease_size_statistics(doc_size);
 
             self.emit(DocumentDeletedEvent { 
+                caller, 
                 collection, 
                 document_id: id,
                 data_hash,
+                creator,
                 timestamp: get_block_timestamp()
             });
         }
@@ -1163,6 +1255,7 @@ mod GurftronDB {
             profile.total_votes_cast += 1;
             self.user_profiles.entry(caller).write(profile);
             self.emit(PointsAwardedForVoting {
+                voter: caller,
                 collection,
                 document_id: doc_id,
                 points_awarded: VOTE_REWARD_POINTS,
@@ -1171,8 +1264,10 @@ mod GurftronDB {
                 timestamp: get_block_timestamp()
             });
             self.emit(DocumentVoteSubmitted { 
+                voter: caller, 
                 collection, 
                 document_id: doc_id,
+                creator: creator,
                 is_valid,
                 positive_votes: positive_votes,
                 negative_votes: negative_votes,
@@ -1205,6 +1300,7 @@ mod GurftronDB {
             let new_points = current_points + VOTE_REWARD_POINTS.try_into().unwrap();
             self.points.entry(voter).write(new_points);
             self.emit(PointsAwardedForVoting {
+                voter,
                 collection,
                 document_id: doc_id,
                 points_awarded: VOTE_REWARD_POINTS,
@@ -1213,8 +1309,10 @@ mod GurftronDB {
                 timestamp: get_block_timestamp()
             });
             self.emit(WhitelistVoteSubmitted {
+                voter,
                 collection,
                 document_id: doc_id,
+                creator: creator,
                 vote_remove,
                 remove_votes: whitelist_remove_votes,
                 keep_votes: whitelist_keep_votes,
@@ -1255,8 +1353,10 @@ mod GurftronDB {
             let total_reports = self.total_malicious_reports.read();
             self.total_malicious_reports.write(total_reports + 1);
             self.emit(MaliciousDataReported { 
+                reporter: caller, 
                 collection, 
                 doc_id, 
+                creator: doc.creator,
                 reason, 
                 report_id,
                 timestamp: get_block_timestamp()
@@ -1299,7 +1399,7 @@ mod GurftronDB {
             };
             self.user_profiles.entry(caller).write(profile);
             self._increment_account_statistics();
-            self.emit(UserRegisteredEvent { timestamp });
+            self.emit(AccountRegistered { account: caller, timestamp });
         }
 
         fn ban_user(ref self: ContractState, user_address: ContractAddress) {
@@ -1326,6 +1426,8 @@ mod GurftronDB {
             };
             self.user_profiles.entry(user_address).write(updated_profile);
             self.emit(UserBannedEvent { 
+                banned_user: user_address, 
+                admin: caller, 
                 reason: 'admin_action',
                 timestamp: get_block_timestamp()
             });
@@ -1355,6 +1457,8 @@ mod GurftronDB {
             };
             self.user_profiles.entry(user_address).write(reset_profile);
             self.emit(UserUnbannedEvent { 
+                unbanned_user: user_address, 
+                admin: caller,
                 timestamp: get_block_timestamp()
             });
         }
@@ -1423,6 +1527,7 @@ mod GurftronDB {
             self.badge_threshold.write(new_badge_threshold);
             self.points_to_strk_wei.write(new_points_to_strk_wei);
             self.emit(ParametersUpdated {
+                admin: get_caller_address(),
                 new_points_per_insert,
                 new_points_per_update,
                 new_points_per_delete,
@@ -1461,6 +1566,7 @@ mod GurftronDB {
             self.slash_percentage.write(slash_percentage);
             self.transaction_fee_percent.write(transaction_fee_percent);
             self.emit(SecurityParametersUpdated {
+                admin: get_caller_address(),
                 min_stake,
                 stake_lock_period,
                 cooldown_period,
@@ -1497,11 +1603,14 @@ mod GurftronDB {
             let total_slashed = self.total_slashed_stakes.read();
             self.total_slashed_stakes.write(total_slashed + amount);
             self.emit(StakeSlashedEvent { 
+                penalized_user: user, 
+                admin: caller, 
                 slashed_amount: amount, 
                 reason,
                 timestamp: get_block_timestamp()
             });
             self.emit(ReputationChangedEvent { 
+                user, 
                 old_reputation: old_reputation, 
                 new_reputation: reputation_score,
                 reason: 'stake_slashed',
@@ -1546,9 +1655,11 @@ mod GurftronDB {
             self._decrease_size_statistics(doc_size);
 
             self.emit(DocumentDeletedEvent { 
+                caller, 
                 collection, 
                 document_id: doc_id,
                 data_hash,
+                creator,
                 timestamp: get_block_timestamp()
             });
         }
@@ -1617,12 +1728,14 @@ mod GurftronDB {
         self.user_profiles.entry(caller).write(updated_profile);
         
         self.emit(RewardClaimedEvent {
+            claimant: caller,
             reward_amount,
             points_used: current_points.into(), // Event expects u256 → convert
             is_premium_bonus: is_premium,
             timestamp: get_block_timestamp()
         });
         self.emit(ReputationChangedEvent { 
+            user: caller, 
             old_reputation, 
             new_reputation: reputation_score,
             reason: 'reward_claimed',
@@ -1680,7 +1793,6 @@ mod GurftronDB {
         self.strk_token_address.read()
     }
 
-    // Returns the STRK token balance held by this contract
     #[external(v0)]
     fn get_contract_token_balance(self: @ContractState) -> u256 {
         let strk_token = IERC20Dispatcher { contract_address: self.strk_token_address.read() };
@@ -1688,7 +1800,6 @@ mod GurftronDB {
         strk_token.balance_of(contract_addr)
     }
 
-    // Returns the STRK token balance for a given user address (public view)
     #[external(v0)]
     fn get_user_token_balance(self: @ContractState, user: ContractAddress) -> u256 {
         let strk_token = IERC20Dispatcher { contract_address: self.strk_token_address.read() };
@@ -1892,11 +2003,13 @@ mod GurftronDB {
             self.emit(DocumentApprovedEvent { 
                 collection, 
                 document_id: doc_id, 
+                creator,
                 positive_votes,
                 total_votes: total_voters,
                 timestamp
             });
             self.emit(ReputationChangedEvent { 
+                user: creator, 
                 old_reputation, 
                 new_reputation: new_reputation,
                 reason: 'document_approved',
@@ -1935,6 +2048,8 @@ mod GurftronDB {
                 let total_slashed = self.total_slashed_stakes.read();
                 self.total_slashed_stakes.write(total_slashed + slash_amount);
                 self.emit(StakeSlashedEvent { 
+                    penalized_user: creator, 
+                    admin: get_contract_address(), 
                     slashed_amount: slash_amount, 
                     reason: 'repeated_violations',
                     timestamp: get_block_timestamp()
@@ -1944,6 +2059,7 @@ mod GurftronDB {
             self.emit(DocumentStatusChanged { 
                 collection, 
                 doc_id, 
+                creator,
                 old_status, 
                 new_status: 'rejected',
                 timestamp: get_block_timestamp()
@@ -2013,6 +2129,7 @@ mod GurftronDB {
             let new_points = current_points + points_to_award.try_into().unwrap();
             self.points.entry(creator).write(new_points);
             self.emit(PointsAwardedForApproval { 
+                recipient: creator,
                 collection, 
                 document_id,
                 points_awarded: points_to_award,
@@ -2025,6 +2142,7 @@ mod GurftronDB {
                 let timestamp = get_block_timestamp();
                 self.badges.entry((creator, timestamp)).write(true);
                 self.emit(BadgeEarnedEvent { 
+                    recipient: creator, 
                     badge_id: timestamp,
                     points_threshold: badge_threshold,
                     timestamp
@@ -2040,6 +2158,7 @@ mod GurftronDB {
                 let new_points = current_points - points_to_deduct.try_into().unwrap();
                 self.points.entry(account).write(new_points);
                 self.emit(PointsDeducted { 
+                    account, 
                     points: points_to_deduct, 
                     total_points: new_points,
                     action_type: 'update',
@@ -2056,6 +2175,7 @@ mod GurftronDB {
                 let new_points = current_points - points_to_deduct.try_into().unwrap();
                 self.points.entry(account).write(new_points);
                 self.emit(PointsDeducted { 
+                    account, 
                     points: points_to_deduct, 
                     total_points: new_points,
                     action_type: 'delete',
@@ -2072,6 +2192,7 @@ mod GurftronDB {
                 let new_points = current_points - points_to_deduct.try_into().unwrap();
                 self.points.entry(account).write(new_points);
                 self.emit(PointsDeducted { 
+                    account, 
                     points: points_to_deduct, 
                     total_points: new_points,
                     action_type: 'query',
@@ -2110,6 +2231,7 @@ mod GurftronDB {
                 self.emit(DocumentWhitelistApproved {
                     collection,
                     document_id: doc_id,
+                    creator: creator,
                     data_hash: data_hash,
                     remove_votes: whitelist_remove_votes,
                     total_votes: whitelist_total_voters,
@@ -2501,7 +2623,7 @@ mod GurftronDB {
         self.only_admin();
         let caller = get_caller_address();
         self.is_circuit_breaker_active.write(true);
-    self.emit(CircuitBreakerTriggered { reason, timestamp: get_block_timestamp() });
+        self.emit(CircuitBreakerTriggered { admin: caller, reason, timestamp: get_block_timestamp() });
     }
 
     #[external(v0)]
