@@ -3,10 +3,13 @@ const { ProvidePlugin } = require('webpack');
 const CopyPlugin = require('copy-webpack-plugin');
 
 module.exports = {
+  cache: false,
   entry: {
     dashboard: './src/dashboard.js',
     background: './src/background.js',
     content: './src/content.js',
+    install: './src/install.js',
+    starknet: './src/starknet.js'
   },
   output: {
     path: path.resolve(__dirname, 'dist'),
@@ -85,10 +88,10 @@ module.exports = {
           to: '[name][ext]',
           globOptions: {
             ignore: [
-              '**/gurftron.js', // Exclude gurftron.js to allow bundling
-              '**/dashboard.js', // Exclude to avoid duplicating bundled files
+              '**/dashboard.js',
+              '**/install.js',
               '**/background.js',
-              '**/content.js',
+              '**/starknet.js'
             ],
           },
         },
@@ -98,7 +101,7 @@ module.exports = {
       ],
     }),
   ],
-  mode: 'production',
+  mode: 'development',
   optimization: {
     minimize: true,
   },
