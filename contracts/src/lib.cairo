@@ -2204,7 +2204,6 @@ mod GurftronDB {
         fn _check_whitelist_consensus(ref self: ContractState, collection: felt252, doc_id: felt252) {
             let doc = self.documents.entry((collection, doc_id)).read();
 
-            // Extract all needed values FIRST, before any mutations
             let creator = doc.creator;
             let data_hash = doc.data_hash;
             let whitelist_remove_votes = doc.whitelist_remove_votes;
