@@ -68,7 +68,7 @@ Users are left vulnerable, with no way to contribute to or benefit from collecti
 
 Gurftron creates a **decentralized security network** where users are both protected and rewarded:
 
-1. 🤖 **AI-Powered Detection**: Multiple AI models (Gemini, OpenAI, Local LLMs) analyze websites in real-time
+1. 🤖 **AI-Powered Detection**: Multiple AI models (Gemini, Local LLMs) analyze websites in real-time
 2. 🔍 **Multi-Layer Scanning**: Integration with Google Safe Browsing, AbuseIPDB, Brave Search, and ClamAV
 3. 🗳️ **Community Validation**: Users vote on detected threats, earning STRK tokens for accurate assessments
 4. ⛓️ **Blockchain Storage**: Threat data stored on Starknet with immutable records
@@ -138,7 +138,7 @@ Gurftron creates a **decentralized security network** where users are both prote
 │  Extension  │◄─── 👤 User browses the web
 └──────┬──────┘
        │
-       ├─► 🤖 AI Analysis (Gemini/OpenAI/Local)
+       ├─► 🤖 AI Analysis (Gemini/Local)
        ├─► 🔍 API Checks (Safe Browsing, AbuseIPDB, etc.)
        ├─► 🦠 File Scanning (ClamAV via Rust Engine)
        │
@@ -192,7 +192,7 @@ Gurftron creates a **decentralized security network** where users are both prote
   - 🔍 Google Safe Browsing
   - 🚫 AbuseIPDB
   - 🔎 Brave Search
-  - 🤖 Gemini/OpenAI for AI analysis
+  - 🤖 Gemini for AI analysis
 
 ### ⛓️ Blockchain
 - 🌐 **Network**: Starknet (Sepolia testnet, Mainnet ready)
@@ -469,7 +469,6 @@ Now connect everything together! 🎯
 
 3. **Select LLM Type**: Choose your preferred AI model:
    - `gemini` - Google's Gemini (recommended, requires API key)
-   - `openai` - OpenAI GPT (requires API key)
    - `local` - Local LLM (privacy-focused, slower)
 
 4. **Save Configuration**: Each setting saves independently
@@ -628,11 +627,6 @@ gurftron/
 - **Get Key**: [Brave Search API](https://brave.com/search/api/)
 - **Free Tier**: Available with registration
 
-#### OpenAI (Alternative to Gemini)
-- **Purpose**: AI analysis using GPT models
-- **Get Key**: [OpenAI Platform](https://platform.openai.com/)
-- **Cost**: Pay-per-use (not free)
-
 ---
 
 ## Development
@@ -783,7 +777,7 @@ This project is licensed under the ISC License. See individual components for sp
 Built with:
 - 🦀 Rust & Tokio
 - 🏛️ Cairo & Starknet
-- 🤖 AI (Gemini, OpenAI, Local LLMs)
+- 🤖 AI (Gemini, Local LLMs)
 - 🛡️ ClamAV
 - ⚡ Node.js & Webpack
 - 🎨 TailwindCSS
