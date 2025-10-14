@@ -7,4 +7,6 @@ src/
 # Files
 key_seed.txt
 package-lock.json
+env
 .env
+.DS_Store
