@@ -361,6 +361,7 @@ touch .env  # (Windows: type nul > .env)
 MONGODB_URI=mongodb://localhost:27017/gurftron
 
 # Starknet Configuration
+STARKNET_RPC_URL=your_rpc_endpoint
 WALLET_PRIVATE_KEY=your_private_key_here
 WALLET_ADDRESS=your_account_address_here
 CONTRACT_ADDRESS=your_deployed_contract_address_here
