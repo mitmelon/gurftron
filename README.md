@@ -744,10 +744,8 @@ We welcome contributions! Here's how:
 - [ ] Local ML models for privacy users
 - [ ] Whitelist inclusion
 - [ ] Deep fake detection in video & images
-- [ ] Firefox and Edge support
 - [ ] Mobile app (React Native)
 - [ ] DAO governance for system parameters
-- [ ] Cross-chain support (Bsc, Polygon)
 - [ ] Enterprise API for businesses
 - [ ] Threat intelligence marketplace
 

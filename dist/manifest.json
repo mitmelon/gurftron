@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "Gurftron",
+  "version": "1.0",
+  "description": "AI-powered phishing protection with gamified rewards on Starknet",
+  "icons": {
+    "16": "images/icon16.png",
+    "32": "images/icon32.png",
+    "48": "images/icon48.png",
+    "128": "images/icon128.png"
+  },
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "tabs",
+    "webRequest",
+    "downloads",
+    "webNavigation",
+    "activeTab",
+    "notifications",
+    "nativeMessaging",
+    "scripting"
+  ],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Gurftron"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["*.js", "*.css", "images/*"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "your-firefox-extension-id@domain.com"
+    }
+  }
+}

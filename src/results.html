@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gurftron | Threat Detected</title>
+  <link rel="stylesheet" href="bundle.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    
+    * {
+      font-family: 'Inter', sans-serif;
+    }
+    
+    body {
+      background: #ffffff;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+    
+    .gradient-text {
+      background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    
+    .content-card {
+      background: rgba(255, 255, 255, 0.9);
+      border-radius: 1.5rem;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+      padding: 2rem;
+      transition: all 0.3s ease;
+    }
+    
+    .logo {
+      background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      font-size: 2rem;
+      font-weight: 800;
+      margin-bottom: 1.5rem;
+      display: inline-block;
+    }
+    
+    .alert-icon {
+      animation: pulse 2s ease-in-out infinite;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.05); opacity: 0.8; }
+    }
+    
+    .btn-primary {
+      background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+      transition: all 0.3s ease;
+      border-radius: 0.75rem;
+      padding: 0.75rem 1.5rem;
+      font-weight: 600;
+      color: white;
+      border: none;
+    }
+    
+    .btn-primary:hover {
+      background: linear-gradient(135deg, #5855eb 0%, #7c3aed 100%);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 16px rgba(99, 102, 241, 0.3);
+    }
+    
+    .btn-danger {
+      background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+      transition: all 0.3s ease;
+      border-radius: 0.75rem;
+      padding: 0.75rem 1.5rem;
+      font-weight: 600;
+      color: white;
+      border: none;
+    }
+    
+    .btn-danger:hover {
+      background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 16px rgba(239, 68, 68, 0.3);
+    }
+    
+    .btn-secondary {
+      background: #f3f4f6;
+      transition: all 0.3s ease;
+      border-radius: 0.75rem;
+      padding: 0.75rem 1.5rem;
+      font-weight: 600;
+      color: #1f2937;
+      border: 2px solid #e5e7eb;
+    }
+    
+    .btn-secondary:hover {
+      background: #e5e7eb;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+    
+    .btn-ghost {
+      background: transparent;
+      transition: all 0.3s ease;
+      border-radius: 0.75rem;
+      padding: 0.75rem 1.5rem;
+      font-weight: 600;
+      color: #6b7280;
+      border: none;
+    }
+    
+    .btn-ghost:hover {
+      background: #f9fafb;
+      color: #374151;
+    }
+    
+    .details-box {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 0.75rem;
+      padding: 1rem;
+      margin: 1rem 0;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    
+    .details-box pre {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      margin: 0;
+      font-size: 0.875rem;
+      color: #374151;
+    }
+    
+    .status-box {
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 0.75rem;
+      padding: 1rem;
+      margin-top: 1rem;
+    }
+    
+    .tx-box {
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      border-radius: 0.75rem;
+      padding: 0.75rem;
+      margin-top: 0.5rem;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4">
+  <div class="w-full max-w-4xl text-center relative z-10">
+    <div class="logo">Gurftron</div>
+    <div class="content-card">
+      <div class="inline-flex items-center justify-center mb-6 alert-icon">
+        <div class="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center">
+          <i class="fas fa-shield-alt text-white text-3xl"></i>
+        </div>
+      </div>
+      
+      <div class="mb-6">
+        <div class="inline-block bg-red-100 text-red-700 px-4 py-2 rounded-full text-sm font-semibold mb-4">
+          <i class="fas fa-exclamation-triangle mr-2"></i>THREAT DETECTED
+        </div>
+        <h1 id="headline" class="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
+          Threat detected — take action
+        </h1>
+        <p id="summary" class="text-lg text-gray-700 leading-relaxed mb-4">
+          Loading details…
+        </p>
+      </div>
+
+      <div class="details-box">
+        <h3 class="text-lg font-semibold text-gray-900 mb-3 text-left">
+          <i class="fas fa-info-circle mr-2 text-blue-600"></i>Why we flagged this
+        </h3>
+        <pre id="details" class="text-left">Loading evidence...</pre>
+        <p id="alreadyRegisteredNote" class="text-sm text-gray-600 mt-3" style="display:none"></p>
+      </div>
+
+      <div class="flex flex-col sm:flex-row gap-3 justify-center mb-4 mt-6">
+        <button id="leaveBtn" class="btn-primary cursor-pointer">
+          <i class="fas fa-sign-out-alt mr-2"></i>Leave Site (Recommended)
+        </button>
+        <button id="blockBtn" class="btn-danger cursor-pointer">
+          <i class="fas fa-ban mr-2"></i>Block Site (On-chain)
+        </button>
+      </div>
+      
+      <div class="flex flex-col sm:flex-row gap-3 justify-center mb-4">
+        <button id="openDash" class="btn-secondary cursor-pointer">
+          <i class="fas fa-tachometer-alt mr-2"></i>Open Dashboard
+        </button>
+        <button id="continueBtn" class="btn-ghost cursor-pointer">
+          <i class="fas fa-arrow-right mr-2"></i>Continue Anyway
+        </button>
+      </div>
+
+      <div id="blockStatus" class="status-box" style="display:none">
+        <div id="statusMessage" class="text-blue-900 font-medium mb-2"></div>
+        <div id="focusActions" style="display:none">
+          <button id="focusTabBtn" class="btn-secondary cursor-pointer text-sm">
+            <i class="fas fa-window-restore mr-2"></i>Focus original tab
+          </button>
+          <p class="text-sm text-gray-600 mt-2">
+            If the wallet prompt doesn't appear, focus the original tab to approve the transaction.
+          </p>
+        </div>
+        <div id="txInfo" class="tx-box" style="display:none">
+          <div class="flex items-start">
+            <i class="fas fa-check-circle text-green-600 text-xl mr-2 mt-1"></i>
+            <div class="text-left flex-1">
+              <div class="font-semibold text-green-900 mb-1">Transaction Submitted</div>
+              <div class="text-sm text-gray-700">
+                <strong>TX Hash:</strong> <span id="txHash" class="font-mono"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <footer class="mt-8 pt-6 border-t border-gray-200 text-gray-600 text-sm">
+        <i class="fas fa-shield-virus mr-2"></i>Gurftron — autonomous threat analysis
+      </footer>
+    </div>
+  </div>
+  <script src="ui-helpers.js"></script>
+  <script type="module" src="results.js"></script>
+</body>
+</html>

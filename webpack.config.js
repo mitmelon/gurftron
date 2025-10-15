@@ -6,6 +6,7 @@ module.exports = {
   cache: false,
   entry: {
     dashboard: './src/dashboard.js',
+    results: './src/results.js',
     background: './src/background.js',
     content: './src/content.js',
     install: './src/install.js',
@@ -90,6 +91,7 @@ module.exports = {
           globOptions: {
             ignore: [
               '**/dashboard.js',
+              '**/results.js',
               '**/install.js',
               '**/background.js',
               '**/content.js',
@@ -100,7 +102,6 @@ module.exports = {
           },
         },
         { from: 'src/*.css', to: '[name][ext]' },
-        { from: 'src/*.png', to: '[name][ext]' },
         { from: 'src/images/*.png', to: 'images/[name][ext]' },
       ],
     }),

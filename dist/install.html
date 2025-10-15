@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gurftron | Welcome to Gurftron - Decentralized Threat Intelligence Network</title>
+    <link rel="stylesheet" href="bundle.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+        
+        * {
+            font-family: 'Inter', sans-serif;
+        }
+        
+        body {
+            background: #ffffff;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        
+        .glass {
+            background: transparent;
+            backdrop-filter: none;
+            border: none;
+            box-shadow: none;
+        }
+        
+        .gradient-text {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        /* Celebration Confetti */
+        .confetti {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            background: #6366f1;
+            border-radius: 2px;
+            animation: confetti-fall 3s linear infinite;
+        }
+        
+        .confetti:nth-child(odd) {
+            background: #3b82f6;
+            border-radius: 50%;
+            animation-delay: -0.5s;
+        }
+        
+        .confetti:nth-child(even) {
+            background: #ef4444;
+            animation-delay: -1s;
+        }
+        
+        .confetti:nth-child(3n) {
+            background: #10b981;
+            animation-delay: -1.5s;
+        }
+        
+        .confetti:nth-child(4n) {
+            background: #8b5cf6;
+            animation-delay: -2s;
+        }
+        
+        @keyframes confetti-fall {
+            0% {
+                opacity: 1;
+                transform: translateY(-100vh) rotate(0deg);
+            }
+            100% {
+                opacity: 0;
+                transform: translateY(100vh) rotate(360deg);
+            }
+        }
+        
+        /* Celebration Animation */
+        .celebrate-bounce {
+            animation: celebrateBounce 2s ease-in-out;
+        }
+        
+        @keyframes celebrateBounce {
+            0%, 20%, 53%, 80%, 100% {
+                transform: translate3d(0, 0, 0);
+            }
+            40%, 43% {
+                transform: translate3d(0, -30px, 0);
+            }
+            70% {
+                transform: translate3d(0, -15px, 0);
+            }
+            90% {
+                transform: translate3d(0, -4px, 0);
+            }
+        }
+        
+        .slide-up {
+            animation: slideUp 1s ease-out;
+        }
+        
+        .slide-up-delayed {
+            animation: slideUp 1s ease-out 0.3s both;
+        }
+        
+        .slide-up-delayed-2 {
+            animation: slideUp 1s ease-out 0.6s both;
+        }
+        
+        .slide-up-delayed-3 {
+            animation: slideUp 1s ease-out 0.9s both;
+        }
+        
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(50px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .connect-wallet-btn {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            transition: all 0.4s ease;
+            padding: 0.75rem 2rem;
+            border-radius: 1rem;
+            font-size: 1.125rem;
+            font-weight: 600;
+        }
+        
+        .connect-wallet-btn:hover {
+            background: linear-gradient(135deg, #5855eb 0%, #7c3aed 100%);
+            transform: translateY(-3px) scale(1.02);
+            box-shadow: 0 12px 24px rgba(99, 102, 241, 0.3);
+        }
+        
+        .feature-icon {
+            width: 80px;
+            height: 80px;
+            background: transparent;
+            backdrop-filter: none;
+            border: none;
+            box-shadow: none;
+        }
+        
+        .stats-card {
+            background: transparent;
+            backdrop-filter: none;
+            border: none;
+            transition: all 0.3s ease;
+            box-shadow: none;
+        }
+        
+        .stats-card:hover {
+            background: transparent;
+            transform: translateY(-5px);
+            box-shadow: none;
+        }
+        
+        /* Floating Animation */
+        .float {
+            animation: float 6s ease-in-out infinite;
+        }
+        
+        .float-delayed {
+            animation: float 6s ease-in-out infinite;
+            animation-delay: -2s;
+        }
+        
+        .float-delayed-2 {
+            animation: float 6s ease-in-out infinite;
+            animation-delay: -4s;
+        }
+        
+        @keyframes float {
+            0%, 100% { transform: translateY(0px) rotate(0deg); }
+            33% { transform: translateY(-15px) rotate(1deg); }
+            66% { transform: translateY(-8px) rotate(-0.5deg); }
+        }
+        
+        /* Success checkmark animation */
+        .success-checkmark {
+            animation: successPop 0.6s ease-out 1.2s both;
+        }
+        
+        @keyframes successPop {
+            0% {
+                transform: scale(0);
+                opacity: 0;
+            }
+            50% {
+                transform: scale(1.2);
+            }
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        /* Card Styles */
+        .content-card {
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 1.5rem;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            padding: 2rem;
+            transition: all 0.3s ease;
+        }
+        
+        .content-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+        }
+
+        .logo {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-size: 3rem;
+            font-weight: 800;
+            margin-bottom: 1.5rem;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4 relative install-page">
+    <div class="fixed inset-0 pointer-events-none z-0">
+        <div class="confetti" style="left: 10%; animation-duration: 3s;"></div>
+        <div class="confetti" style="left: 20%; animation-duration: 2.5s;"></div>
+        <div class="confetti" style="left: 30%; animation-duration: 3.5s;"></div>
+        <div class="confetti" style="left: 40%; animation-duration: 2s;"></div>
+        <div class="confetti" style="left: 50%; animation-duration: 3.2s;"></div>
+        <div class="confetti" style="left: 60%; animation-duration: 2.8s;"></div>
+        <div class="confetti" style="left: 70%; animation-duration: 3.8s;"></div>
+        <div class="confetti" style="left: 80%; animation-duration: 2.3s;"></div>
+        <div class="confetti" style="left: 90%; animation-duration: 3.6s;"></div>
+        <div class="confetti" style="left: 95%; animation-duration: 2.7s;"></div>
+    </div>
+    <div class="fixed inset-0 overflow-hidden pointer-events-none z-0">
+        <div class="absolute top-20 left-16 feature-icon rounded-2xl flex items-center justify-center float">
+            <i class="fas fa-trophy text-blue-600 text-3xl"></i>
+        </div>
+        <div class="absolute top-32 right-20 feature-icon rounded-2xl flex items-center justify-center float-delayed">
+            <i class="fas fa-star text-blue-600 text-3xl"></i>
+        </div>
+        <div class="absolute bottom-32 left-20 feature-icon rounded-2xl flex items-center justify-center float-delayed-2">
+            <i class="fas fa-gem text-purple-500 text-3xl"></i>
+        </div>
+        <div class="absolute bottom-20 right-16 feature-icon rounded-2xl flex items-center justify-center float">
+            <i class="fas fa-crown text-blue-600 text-3xl"></i>
+        </div>
+    </div>
+    <div class="w-full max-w-4xl text-center relative z-10">
+        <img class="logo" src="logo.png" width="50px">
+        <div class="content-card">
+            <div class="inline-flex items-center justify-center mb-8 success-checkmark">
+                <div class="w-24 h-24 bg-green-500 rounded-full flex items-center justify-center">
+                    <i class="fas fa-check text-white text-4xl"></i>
+                </div>
+            </div>
+            <div class="celebrate-bounce mb-8">
+                <h1 class="text-6xl md:text-7xl font-bold text-gray-900 mb-4">
+                    🎉 Welcome! 🎉
+                </h1>
+                <h2 class="text-3xl md:text-4xl font-bold gradient-text mb-6 slide-up-delayed">
+                    Congratulations!
+                </h2>
+            </div>
+            <div class="p-8 md:p-12 mb-8 slide-up-delayed-2">
+                <div class="mb-8">
+                    <h3 class="text-2xl md:text-3xl font-bold text-gray-900 mb-4">
+                        🚀 Gurftron Successfully Installed!
+                    </h3>
+                    <p class="text-xl text-gray-700 leading-relaxed mb-6">
+                        Thank you for choosing Gurftron as your trusted security partner. 
+                        Your browsing actions are now protected by our advanced AI-powered security system.
+                    </p>
+                    <p class="text-lg text-gray-600 leading-relaxed">
+                        Connect your wallet to begin monitoring threats, managing your whitelist, 
+                        and accessing real-time security analytics that keep you one step ahead of cyber threats.
+                    </p>
+                </div>
+                <div class="grid md:grid-cols-3 gap-6 mb-8">
+                    <div class="text-center">
+                        <div class="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                            <i class="fas fa-robot text-blue-600 text-2xl"></i>
+                        </div>
+                        <h4 class="text-gray-900 font-semibold mb-2">AI-Powered Detection</h4>
+                        <p class="text-gray-600 text-sm">Advanced machine learning algorithms detect and block threats in real-time</p>
+                    </div>
+                    <div class="text-center">
+                        <div class="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                            <i class="fas fa-shield-virus text-green-600 text-2xl"></i>
+                        </div>
+                        <h4 class="text-gray-900 font-semibold mb-2">24/7 Protection</h4>
+                        <p class="text-gray-600 text-sm">Round-the-clock monitoring ensures your browsing are always protected</p>
+                    </div>
+                    <div class="text-center">
+                        <div class="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                            <i class="fas fa-chart-line text-purple-600 text-2xl"></i>
+                        </div>
+                        <h4 class="text-gray-900 font-semibold mb-2">Smart Analytics</h4>
+                        <p class="text-gray-600 text-sm">Comprehensive insights and reports on your security landscape</p>
+                    </div>
+                </div>
+                <button id="connectWalletBtn" class="connect-wallet-btn text-white font-semibold flex items-center justify-center space-x-4 mx-auto cursor-pointer">
+                    <i class="fas fa-wallet text-lg"></i>
+                    <span>Connect Wallet</span>
+                    <i class="fas fa-arrow-right"></i>
+                </button>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 slide-up-delayed-3">
+                <div class="stats-card rounded-2xl p-6 text-center">
+                    <div class="text-3xl font-bold text-gray-900 mb-2">10,000+</div>
+                    <div class="text-gray-600">Protected Users</div>
+                </div>
+                <div class="stats-card rounded-2xl p-6 text-center">
+                    <div class="text-3xl font-bold text-gray-900 mb-2">1M+</div>
+                    <div class="text-gray-600">Threats Blocked</div>
+                </div>
+                <div class="stats-card rounded-2xl p-6 text-center">
+                    <div class="text-3xl font-bold text-gray-900 mb-2">99.9%</div>
+                    <div class="text-gray-600">Uptime Guarantee</div>
+                </div>
+            </div>
+            <div class="text-center text-gray-600">
+                <p class="text-lg">Ready to experience next-generation security? Let's get started! 🔥</p>
+            </div>
+        </div>
+    </div>
+    <script src="ui-helpers.js"></script>
+    <script src="install.js"></script>
+</body>
+</html>

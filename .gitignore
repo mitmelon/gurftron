@@ -1,12 +1,8 @@
-# Directories (no need for leading slash unless you want to match only at root)
+# Directories
 node_modules/
-asset/
-dist/
-src/
 
 # Files
 key_seed.txt
 package-lock.json
-env
 .env
 .DS_Store
