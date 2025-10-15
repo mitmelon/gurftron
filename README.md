@@ -572,17 +572,24 @@ gurftron/
 │       └── README.md          # Engine build guide
 │
 ├── src/                       # Chrome extension source
-│   ├── background.js          # Service worker
-│   ├── content.js             # Content script injector
-│   ├── dashboard.html         # Main dashboard UI
-│   ├── dashboard.js           # Dashboard logic
-│   ├── settings.html          # Settings page
-│   ├── login.html             # Wallet connection
-│   ├── gurftron.js            # Core threat detection
-│   ├── starknet.js            # Blockchain interactions
-│   ├── contract-writer.js     # Smart contract calls
-│   ├── dexieStorage.js        # Local database
-│   └── images/                # Icons and assets
+│   ├── background.js          # Service worker (background service worker / SW)
+│   ├── bundle.css             # Compiled CSS bundle (Tailwind output)
+│   ├── content.js             # Content script that injects and orchestrates page scanning
+│   ├── contract-writer.js     # Smart contract call helpers and writer logic
+│   ├── dashboard.html         # Main dashboard UI (extension popup / UI page)
+│   ├── dashboard.js           # Dashboard page logic and UI interactions
+│   ├── dexieStorage.js        # Dexie wrapper for IndexedDB persistence
+│   ├── gurftron.js            # Injected helper script for page instrumentation
+│   ├── install.html           # Installation / welcome page UI
+│   ├── install.js             # Installation page logic
+│   ├── login.html             # Wallet connection / login UI
+│   ├── results.css            # Styles specific to results UI
+│   ├── results.html           # Results page shown when a threat is detected
+│   ├── results.js             # Results page logic (ESM module)
+│   ├── settings.html          # Settings page UI
+│   ├── starknet.js            # Blockchain interactions and wallet helpers
+│   ├── ui-helpers.js          # Small UI utilities (toasts, ajax helpers)
+│   └── images/                # Icons and other image assets used by the extension
 │
 ├── dist/                      # Built extension (after npm run build)
 │
