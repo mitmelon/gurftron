@@ -41,6 +41,7 @@ class GurftronThreatDetector {
       abuseSubmissionOptIn: options.abuseSubmissionOptIn || false,
       mutationRateThreshold: options.mutationRateThreshold || 100,
       domainInfoCacheTTL: 7 * 24 * 60 * 60 * 1000,
+      domainLLMCooldownMs: options.domainLLMCooldownMs || 2 * 60 * 1000,
       debounceMs: options.debounceMs || 500,
       maxScansPerBatch: options.maxScansPerBatch || 20,
       scanCacheTTL: options.scanCacheTTL || 3600000
@@ -57,6 +58,7 @@ class GurftronThreatDetector {
     this.metrics = { scans: 0, threatsDetected: 0, llmCalls: 0 };
     this.threatsLog = [];
     this.signalStore = new Map();
+    this.domainLLMResourceMap = new Map();
     this.signalTTL = options.signalTTL || 60 * 1000;
     this.minSignals = options.minSignals || 1;
     this.mutationCount = 0;
@@ -323,6 +325,32 @@ class GurftronThreatDetector {
     });
   }
 
+  // Check cooldown for a specific resource under a domain (resourceKey should be element src or url)
+  shouldAllowHeavyLLMForResource(domain, resourceKey) {
+    try {
+      if (!domain) return true;
+      let domainMap = this.domainLLMResourceMap.get(domain);
+      if (!domainMap) return true;
+      const last = domainMap.get(resourceKey) || 0;
+      const now = Date.now();
+      return (now - last) >= (this.config.domainLLMCooldownMs || (2 * 60 * 1000));
+    } catch (e) {
+      return true;
+    }
+  }
+
+  recordResourceLLM(domain, resourceKey) {
+    try {
+      if (!domain) return;
+      let domainMap = this.domainLLMResourceMap.get(domain);
+      if (!domainMap) {
+        domainMap = new Map();
+        this.domainLLMResourceMap.set(domain, domainMap);
+      }
+      domainMap.set(resourceKey, Date.now());
+    } catch (e) {}
+  }
+
   async analyzeWithLLM(evidenceText, category, options = {}) {
     this.metrics.llmCalls++;
     this.updateMetrics();
@@ -330,11 +358,22 @@ class GurftronThreatDetector {
     // Log LLM call for debugging
     this.log('info', `🤖 LLM Analysis Started: ${category}`);
     
-    options = Object.assign({ passFullQuoted: true }, options || {});
-    let payloadText = evidenceText;
-    if (options.passFullQuoted && typeof evidenceText === 'string') {
-      const safe = evidenceText.replace(/\"\"\"/g, '\\\"\\\"\\\"');
+    // Default options and safe prompt size guard
+    options = Object.assign({ passFullQuoted: true, maxPromptChars: 8000 }, options || {});
+    let payloadText = evidenceText || '';
+    if (options.passFullQuoted && typeof payloadText === 'string') {
+      const safe = payloadText.replace(/\"\"\"/g, '\\\"\\\"\\\"');
       payloadText = `"""${safe}"""`;
+    }
+
+    if (typeof payloadText === 'string' && payloadText.length > options.maxPromptChars) {
+      const originalLength = payloadText.length;
+      // Keep head and tail with an ellipsis marker
+      const keep = Math.floor(options.maxPromptChars / 2) - 64;
+      const head = payloadText.slice(0, keep);
+      const tail = payloadText.slice(-keep);
+      payloadText = `${head}\n\n...[TRUNCATED ${originalLength - (keep * 2)} chars]...\n\n${tail}`;
+      this.log('warn', `LLM prompt truncated from ${originalLength} to ${payloadText.length} chars for category=${category}`);
     }
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({
@@ -1085,7 +1124,7 @@ class GurftronThreatDetector {
       if (pageTitle && pageContent) {
         this.log('info', '🔍 Calling Brave Search for impersonation detection...');
         searchEvidence = await this.deepSearchForImpersonation(url, pageTitle, pageContent, domain);
-        this.log('info', `📊 Brave Search returned ${searchEvidence.length} evidence items`);
+        this.log('info', `Brave Search returned ${searchEvidence.length} evidence items`);
         
         if (searchEvidence.length > 0) {
           const maxSearchScore = Math.max(...searchEvidence.map(e => e.score));
@@ -1093,17 +1132,29 @@ class GurftronThreatDetector {
           evidence.push(...searchEvidence);
           if (maxSearchScore >= 0.7) isPhishing = true;
           
-          this.log('warn', `⚠️ Brave Search found suspicious results! Max score: ${maxSearchScore.toFixed(2)}`);
+          this.log('warn', `Brave Search found suspicious results! Max score: ${maxSearchScore.toFixed(2)}`);
         } else {
-          this.log('info', '✅ Brave Search found no suspicious results');
+          this.log('info', 'Brave Search found no suspicious results');
         }
       } else {
-        this.log('warn', '⚠️ Skipping Brave Search - missing pageTitle or pageContent');
+        this.log('warn', 'Skipping Brave Search - missing pageTitle or pageContent');
       }
 
       const llmReasoningPrompt = `You are a senior cybersecurity analyst. Your task: determine if this URL is a phishing site. Return ONLY a valid JSON object with: {"isPhishing": boolean, "confidence": number (0.0 to 1.0), "summary": string, "keyEvidence": string[], "recommendedAction": "block" | "warn" | "allow"}. CONTEXT: URL: ${url}, Domain: ${domain}, Page Title: ${pageTitle || 'N/A'}, Page Snippet: ${pageContent?.substring(0, 300) || 'N/A'}, Domain Info: ${JSON.stringify(domainInfo || {}, null, 2)}, Search Evidence: ${JSON.stringify(searchEvidence, null, 2)}, Domain Risk Analysis: ${JSON.stringify(domainRiskAnalysis || {}, null, 2)}`;
 
-      const llmReasoningResult = await this.analyzeWithLLM(llmReasoningPrompt, 'phishing_reasoning', { passFullQuoted: true });
+      // Respect per-resource cooldown for heavy LLM reasoning
+      const reasonDomain = this.extractDomain(url);
+      const reasonResource = url;
+      let llmReasoningResult;
+      if (!this.shouldAllowHeavyLLMForResource(reasonDomain, reasonResource)) {
+        this.log('info', `Skipping heavy phishing LLM reasoning due to resource cooldown for: ${reasonResource} on ${reasonDomain}`);
+        // Perform a lighter LLM check with a shorter context
+        const litePrompt = `Quickly check for obvious phishing keywords or urgent lures in the page snippet: ${pageContent?.substring(0, 800) || 'N/A'}`;
+        llmReasoningResult = await this.analyzeWithLLM(litePrompt, 'phishing_reasoning_lite');
+      } else {
+        this.recordResourceLLM(reasonDomain, reasonResource);
+        llmReasoningResult = await this.analyzeWithLLM(llmReasoningPrompt, 'phishing_reasoning', { passFullQuoted: true });
+      }
       let llmVerdict = null;
 
       try {
@@ -1161,7 +1212,7 @@ class GurftronThreatDetector {
         };
         this.recordThreat(threatRecord);
       } else {
-        this.log('info', `✅ No phishing detected for: ${domain}`);
+        this.log('info', `No phishing detected for: ${domain}`);
       }
 
       return finalResult;
@@ -1311,14 +1362,72 @@ class GurftronThreatDetector {
 
   async scanScript(content, element = null) {
     if (!content) return null;
+
     const evidences = [];
-    evidences.push(`Script content length: ${content.length}; Entropy: ${this.calculateEntropy(content)}`);
-    evidences.push(`Contains eval or dynamic code: ${/eval|Function|setTimeout|setInterval/i.test(content) ? 'Yes' : 'No'}`);
+    const length = content.length;
+    const entropy = this.calculateEntropy(content);
+    const hasDynamic = /eval|Function\(|setTimeout|setInterval|new Function/i.test(content);
+    const networkCalls = (content.match(/fetch\(|XMLHttpRequest|axios|open\(|send\(/i) || []).length;
+    const storageAccess = (content.match(/localStorage|sessionStorage|document.cookie/i) || []).length;
+
+    evidences.push(`Script content length: ${length}; Entropy: ${entropy.toFixed(2)}`);
+    evidences.push(`Contains eval/dynamic code: ${hasDynamic ? 'Yes' : 'No'}`);
     evidences.push(`Event listeners: ${content.match(/addEventListener/g)?.length || 0}`);
-    evidences.push(`Network calls: ${content.match(/fetch|XMLHttpRequest|axios/i)?.length || 0}`);
-    evidences.push(`Storage access: ${content.match(/localStorage|sessionStorage|cookie/i)?.length || 0}`);
-    const evidenceText = evidences.join('\n') + `\nFull content: ${content}`;
-    const prompt = `Analyze script for malicious activity, obfuscation, eval usage, data exfiltration, wallet draining: ${evidenceText}`;
+    evidences.push(`Network calls: ${networkCalls}`);
+    evidences.push(`Storage access: ${storageAccess}`);
+
+    // Heuristic: if a script is very large but has no dynamic or network indicators and low entropy,
+    // skip LLM analysis to avoid false positives and heavy prompts.
+    const VERY_LARGE = 200000; // chars
+    const LARGE = 20000; // chars
+    if (length > VERY_LARGE && !hasDynamic && networkCalls === 0 && entropy < 4.0) {
+      this.log('info', `Skipping LLM for very large benign-appearing script (len=${length}, entropy=${entropy.toFixed(2)})`);
+      // still register a light signal so it can be cached/seen later
+      this.registerSignal('script_skipped_large', element?.src || this.currentUrl, 0.0, 'Skipped large benign script');
+      return null;
+    }
+
+    // Build a compact sample for LLM when content is large. Keep head, middle, tail excerpts.
+    let sample = content;
+    if (length > LARGE) {
+      // Try to extract only suspicious parts (preferable to naive head/middle/tail sampling)
+      try {
+        const extracted = await this.extractSuspiciousScriptParts(content, 6000);
+        if (extracted && extracted.length > 128) {
+          sample = extracted;
+          this.log('info', `Using extracted suspicious parts for LLM (original len=${length}, sample len=${sample.length})`);
+        } else {
+          const part = Math.floor(LARGE / 3);
+          const head = content.slice(0, part);
+          const middle = content.slice(Math.floor((length - part) / 2), Math.floor((length + part) / 2));
+          const tail = content.slice(-part);
+          sample = `${head}\n\n/*...SNIPPET MIDDLE...*/\n\n${middle}\n\n/*...SNIPPET END...*/\n\n${tail}`;
+          this.log('info', `Using sampled script excerpts for LLM (original len=${length}, sample len=${sample.length})`);
+        }
+      } catch (e) {
+        const part = Math.floor(LARGE / 3);
+        const head = content.slice(0, part);
+        const middle = content.slice(Math.floor((length - part) / 2), Math.floor((length + part) / 2));
+        const tail = content.slice(-part);
+        sample = `${head}\n\n/*...SNIPPET MIDDLE...*/\n\n${middle}\n\n/*...SNIPPET END...*/\n\n${tail}`;
+        this.log('warn', 'extractSuspiciousScriptParts failed, falling back to sampled excerpts:', e && e.message);
+      }
+    }
+
+    const evidenceText = evidences.join('\n') + `\nScript sample length: ${sample.length}`;
+    const prompt = `Analyze script for malicious activity, obfuscation, eval usage, data exfiltration, wallet draining. Provide concise JSON: {threat: boolean, confidence: number, details: string}. Script evidence: ${evidenceText}\nSample:\n${sample}`;
+
+    // Check per-resource cooldown to avoid repeated heavy LLM analyses for same resource
+    const domain = this.extractDomain(this.currentUrl);
+    const resourceKey = element?.src || this.currentUrl;
+    if (!this.shouldAllowHeavyLLMForResource(domain, resourceKey)) {
+      this.log('info', `Skipping heavy LLM for resource due to cooldown: ${resourceKey} on ${domain}`);
+      // Register a light signal for telemetry
+      this.registerSignal('script_skipped_cooldown', resourceKey, 0.0, 'Skipped heavy LLM due to resource cooldown');
+      return null;
+    }
+
+    this.recordResourceLLM(domain, resourceKey);
     const llmResult = await this.analyzeWithLLM(prompt, 'script_threats');
     const isThreat = llmResult.threat;
     if (isThreat) {
@@ -1326,6 +1435,91 @@ class GurftronThreatDetector {
       this.registerSignal('script_threat', element?.src || this.currentUrl, score, llmResult.details);
     }
     return null;
+  }
+
+  async extractSuspiciousScriptParts(content, maxChars = 6000) {
+    try {
+      if (!content || typeof content !== 'string') return '';
+      const len = content.length;
+      const matches = [];
+
+      const pushSnippet = (name, idx, matchLen) => {
+        const ctx = 250; // capture 250 chars of context each side
+        const start = Math.max(0, idx - ctx);
+        const end = Math.min(len, idx + (matchLen || 0) + ctx);
+        let snippet = content.slice(start, end);
+        // shorten long snippet edges
+        if (snippet.length > 1200) snippet = snippet.slice(0, 600) + '\n...\n' + snippet.slice(-600);
+        matches.push({ name, snippet });
+      };
+
+      // Patterns to look for
+      const patterns = [
+        { name: 'dynamic_eval', re: /eval\s*\(|new\s+Function\s*\(|Function\s*\(/ig },
+        { name: 'obfuscation_base64', re: /(?:[A-Za-z0-9+\/]{80,}=*)/g },
+        { name: 'obfuscation_fromChar', re: /fromCharCode\s*\(|unescape\s*\(|atob\s*\(/ig },
+        { name: 'network_calls', re: /fetch\s*\(|XMLHttpRequest\b|axios\.|open\s*\(|send\s*\(|WebSocket\b/ig },
+        { name: 'storage_access', re: /localStorage\b|sessionStorage\b|document\.cookie\b/ig },
+        { name: 'dom_write', re: /innerHTML\b|insertAdjacentHTML\b|document\.write\b/ig },
+        { name: 'form_submit', re: /\.submit\s*\(|<form[\s\S]*?>/ig },
+        { name: 'crypto', re: /crypto\.subtle|window\.crypto\b/ig },
+        { name: 'prompt_injection_like', re: /return only a valid json|return only json|ignore previous instructions|output json/ig },
+        { name: 'external_urls', re: /https?:\/\/[^\s'"\)\>]{8,300}/ig }
+      ];
+
+      for (const p of patterns) {
+        try {
+          let m;
+          while ((m = p.re.exec(content)) !== null) {
+            const idx = m.index;
+            const matchLen = m[0] ? m[0].length : 0;
+            pushSnippet(p.name, idx, matchLen);
+            // limit duplicates
+            if (matches.length > 30) break;
+          }
+        } catch (e) {}
+        if (matches.length > 30) break;
+      }
+
+      // Also extract suspicious long strings that look like encoded blobs
+      try {
+        const longStrings = content.match(/['\"]([A-Za-z0-9+\/=]{100,})['\"]/g) || [];
+        for (const s of longStrings.slice(0, 5)) {
+          const idx = content.indexOf(s);
+          if (idx >= 0) pushSnippet('long_encoded_string', idx, s.length);
+        }
+      } catch (e) {}
+
+      // Unique by snippet content
+      const uniq = [];
+      const seen = new Set();
+      for (const m of matches) {
+        const key = m.snippet.slice(0, 200);
+        if (!seen.has(key)) { seen.add(key); uniq.push(m); }
+      }
+
+      if (uniq.length === 0) return '';
+
+      // Compose labeled combined output within maxChars
+      let out = '';
+      for (const u of uniq) {
+        const block = `/* SUSPICIOUS: ${u.name} */\n${u.snippet}\n\n`;
+        if ((out.length + block.length) > maxChars) {
+          // try to trim the block to fit
+          const remain = Math.max(0, maxChars - out.length - 64);
+          if (remain <= 0) break;
+          out += block.slice(0, remain) + '\n...\n';
+          break;
+        }
+        out += block;
+      }
+
+      // If still empty or too small, return '' to allow fallback sampling
+      return out.trim().slice(0, maxChars);
+    } catch (e) {
+      this.log('error', 'extractSuspiciousScriptParts failed:', e && e.message);
+      return '';
+    }
   }
 
   calculateEntropy(str) {
@@ -1370,12 +1564,105 @@ class GurftronThreatDetector {
     const text = document.body?.textContent || '';
     const evidences = [];
     evidences.push(`Text length: ${text.length}`);
-    const evidenceText = evidences.join('\n') + `\nFull text: ${text.slice(0, 4000)}`;
+
+    // First: use Brave deep search to find similar pages that might be impersonators
+    const domain = this.extractDomain(this.currentUrl);
+    let searchResults = [];
+
+    // If this specific resource (page) is under cooldown, skip heavy Brave deep search and comparison
+    const resourceKey = this.currentUrl;
+    if (!this.shouldAllowHeavyLLMForResource(domain, resourceKey)) {
+      this.log('info', `Skipping Brave deep search for resource due to cooldown: ${resourceKey} on ${domain}`);
+      // fall back to original DOM analysis
+      const evidenceText = evidences.join('\n') + `\nFull text snapshot: ${text.slice(0, 4000)}`;
+      const prompt = `Analyze DOM text for phishing keywords, urgency tactics, credential requests: ${evidenceText}`;
+      const domResult = await this.analyzeWithLLM(prompt, 'dom_threats');
+      const domThreat = domResult.threat;
+      if (domThreat) {
+        this.registerSignal('dom_threat', this.currentUrl, domResult.confidence || 0.4, domResult.details);
+      }
+      return null;
+    }
+    try {
+      this.log('info', 'Running Brave deep search for impersonation candidates');
+      searchResults = await this.deepSearchForImpersonation(this.currentUrl, document.title, text, domain) || [];
+      this.log('info', `Brave deep search returned ${searchResults.length} candidates`);
+    } catch (e) {
+      this.log('warn', 'Brave deep search failed:', e && e.message);
+      searchResults = [];
+    }
+
+    // Limit the number of candidates to check to avoid excessive LLM calls
+    const MAX_CANDIDATES = 5;
+    for (const cand of (searchResults.slice(0, MAX_CANDIDATES))) {
+      try {
+        const candUrl = (cand && (cand.url || cand.link || cand.target || cand.href)) || String(cand || '');
+        if (!candUrl) continue;
+
+        // Avoid comparing with the same URL or same domain (self-links) to reduce false positives
+        const candDomain = this.extractDomain(candUrl);
+        if (!candUrl || candUrl === this.currentUrl || candDomain === domain) {
+          this.log('debug', 'Skipping candidate (same domain or same URL):', candUrl);
+          continue;
+        }
+
+        this.log('info', 'Fetching candidate snippet for comparison:', candUrl);
+
+        // Try background-offloaded snippet first (background can bypass CORS), fall back to fetch
+        let candSnippet = '';
+        try {
+          candSnippet = await this.offloadScan('link_snippet', { url: candUrl }) || '';
+        } catch (e) {
+          this.log('debug', 'offloadScan link_snippet failed, falling back to fetchContent:', e && e.message);
+          candSnippet = '';
+        }
+        if (!candSnippet) {
+          try { candSnippet = await this.fetchContent(candUrl); } catch (e) { candSnippet = ''; }
+        }
+
+        // Prepare compact samples for comparison to keep prompts small
+        const sampleOriginal = text.slice(0, 2000);
+        const sampleCandidate = (typeof candSnippet === 'string' ? candSnippet : JSON.stringify(candSnippet || '')).slice(0, 4000);
+
+        const comparePrompt = `You are a senior cybersecurity analyst. Compare the ORIGINAL page and the CANDIDATE page and determine if the CANDIDATE is impersonating the ORIGINAL. Return ONLY a JSON object with exactly: {"isImpersonation": boolean, "confidence": number (0.0-1.0), "reasons": string[] }.\n\nORIGINAL_URL: ${this.currentUrl}\nORIGINAL_TITLE: ${document.title || 'N/A'}\nORIGINAL_SNIPPET: ${sampleOriginal}\n\nCANDIDATE_URL: ${candUrl}\nCANDIDATE_SNIPPET: ${sampleCandidate}`;
+
+        const llmResult = await this.analyzeWithLLM(comparePrompt, 'impersonation_check', { passFullQuoted: true, maxPromptChars: 8000 });
+
+        // Parse structured JSON result if possible
+        let parsed = null;
+        try { parsed = JSON.parse(llmResult.details); } catch (e) {
+          // Fallback: try to extract first JSON-like object from details
+          const m = (llmResult.details || '').match(/\{[\s\S]*\}/);
+          if (m) {
+            try { parsed = JSON.parse(m[0]); } catch (e2) { parsed = null; }
+          }
+        }
+
+        const isImpersonation = parsed?.isImpersonation || false;
+        const conf = parsed?.confidence || llmResult.confidence || 0;
+
+        if (isImpersonation && conf >= 0.75) {
+          this.log('warn', `Impersonation detected: ${candUrl} (confidence=${conf})`);
+          this.registerSignal('impersonation', candUrl, conf, (parsed && parsed.reasons) ? parsed.reasons.join('; ') : llmResult.details);
+
+          const threatJson = await this.createThreatJson(candUrl, sampleCandidate.slice(0, 500), 'impersonation', conf >= 0.9 ? 'critical' : 'high', null, null, (parsed && parsed.reasons) ? parsed.reasons.join('; ') : llmResult.details);
+          this.recordThreat(threatJson);
+          return threatJson;
+        } else {
+          this.log('info', `Candidate not impersonation or low confidence (${conf.toFixed ? conf.toFixed(2) : conf}): ${candUrl}`);
+        }
+      } catch (e) {
+        this.log('error', 'Impersonation candidate check failed:', e && e.message);
+      }
+    }
+
+    // If no impersonation candidates were found/flagged, fall back to the original DOM analysis
+    const evidenceText = evidences.join('\n') + `\nFull text snapshot: ${text.slice(0, 4000)}`;
     const prompt = `Analyze DOM text for phishing keywords, urgency tactics, credential requests: ${evidenceText}`;
-    const llmResult = await this.analyzeWithLLM(prompt, 'dom_threats');
-    const isThreat = llmResult.threat;
-    if (isThreat) {
-      this.registerSignal('dom_threat', this.currentUrl, llmResult.confidence || 0.4, llmResult.details);
+    const domResult = await this.analyzeWithLLM(prompt, 'dom_threats');
+    const domThreat = domResult.threat;
+    if (domThreat) {
+      this.registerSignal('dom_threat', this.currentUrl, domResult.confidence || 0.4, domResult.details);
     }
     return null;
   }

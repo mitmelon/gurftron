@@ -486,14 +486,6 @@ Connect the extension to your backend server:
 
 This enables the extension to submit threats and votes to the smart contract through your server.
 
-#### E. Enter Smart Contract Address (Optional)
-
-If you deployed your own contract:
-
-1. Open the extension's `contract-writer.js` or settings
-2. Update the contract address to your deployed address
-3. Save and restart the extension
-
 ---
 
 ## 💰 Earning Rewards

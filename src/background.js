@@ -892,10 +892,61 @@ function calculateImageEntropy(data) {
 
 async function getLinkSnippet(url) {
   try {
-    const response = await fetch(url, { headers: { Range: 'bytes=0-1023' } });
-    return await response.text();
+    // Try a ranged request first to limit payload and speed up response
+    const controller = new AbortController();
+    const timeoutMs = 5000;
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    let response;
+    try {
+      response = await fetch(url, { headers: { Range: 'bytes=0-8191', 'User-Agent': 'Gurftron/1.0' }, signal: controller.signal });
+    } catch (rangedErr) {
+      // If ranged request fails (CORS or abort), fall back to a simple fetch without Range
+      clearTimeout(timeout);
+      try {
+        const fallbackController = new AbortController();
+        const fbTimeout = setTimeout(() => fallbackController.abort(), timeoutMs);
+        response = await fetch(url, { headers: { 'User-Agent': 'Gurftron/1.0' }, signal: fallbackController.signal });
+        clearTimeout(fbTimeout);
+      } catch (fbErr) {
+        await logErrorToDB(fbErr, 'getLinkSnippet_fallback');
+        return '';
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (!response || !response.ok) {
+      // Non-ok responses should return empty but log for debugging
+      const err = new Error(`Failed to fetch snippet: status=${response && response.status}`);
+      await logErrorToDB(err, 'getLinkSnippet_status');
+      return '';
+    }
+
+    // Read as text but guard against binary content
+    let text = '';
+    try {
+      text = await response.text();
+    } catch (e) {
+      await logErrorToDB(e, 'getLinkSnippet_read');
+      return '';
+    }
+
+    // Sanitize: remove script tags and inline event handlers to avoid accidental execution if reflected
+    try {
+      text = text.replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '');
+      // remove on* attributes
+      text = text.replace(/\son[a-zA-Z]+=\"[\s\S]*?\"/gi, '');
+      text = text.replace(/\son[a-zA-Z]+=\'[\s\S]*?\'/gi, '');
+    } catch (sanErr) {
+      // ignore sanitization errors
+    }
+    // Limit size to 4000 chars to avoid huge payloads going back to content script
+    if (text && text.length > 4000) text = text.slice(0, 4000);
+    return text;
   } catch (error) {
     await logErrorToDB(error, 'getLinkSnippet');
+    return '';
   }
 }
 
