@@ -4,5 +4,6 @@ node_modules/
 # Files
 key_seed.txt
 package-lock.json
+.
 .env
 .DS_Store

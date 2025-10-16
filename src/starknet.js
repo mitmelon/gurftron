@@ -9,7 +9,7 @@ const CONFIG = {
   NETWORK: {
     STARKNET: {
       TESTNET: {
-        PROVIDER_URL: 'https://starknet-sepolia.g.alchemy.com/starknet/version/rpc/v0_8/O2Um2MxXEjalg3IN4TeL3',
+        PROVIDER_URL: 'https://starknet-sepolia.g.alchemy.com/starknet/version/rpc/',
         CONTRACT_ADDRESS: '0x018cafa4fe61687014475b200f4641ddf8e01d42f3fd663a51f3d5ee19df964b'
       },
       MAINNET: {

@@ -416,6 +416,7 @@ window.addEventListener('load', () => {
     updateScansTodayCard();
     initLinks();
     initModalButtons();
+    try { initStakeModalButtons(); } catch (e) {}
     setTimeout(() => fetchAndRenderRecentThreats(), 500);
     updateSecuritySetupStatus();
     try { wireSettingsForms && wireSettingsForms(); } catch (e) {}
@@ -586,8 +587,16 @@ function initStakeModalButtons() {
     const stakeClose = document.getElementById('stake-close-btn');
     const stakeCancel = document.getElementById('stake-cancel-btn');
     const stakeConfirm = document.getElementById('stake-confirm-btn');
-    if (stakeClose) stakeClose.addEventListener('click', () => { const m = document.getElementById('stakeModal'); if (m) m.classList.remove('active'); });
-    if (stakeCancel) stakeCancel.addEventListener('click', () => { const m = document.getElementById('stakeModal'); if (m) m.classList.remove('active'); });
+    const tryCloseStakeModal = () => {
+        const busy = stakeConfirm && stakeConfirm.getAttribute('aria-busy') === 'true';
+        if (busy) {
+            gToast.info('Staking in progress — please wait for confirmation');
+            return;
+        }
+        const m = document.getElementById('stakeModal'); if (m) m.classList.remove('active');
+    };
+    if (stakeClose) stakeClose.addEventListener('click', tryCloseStakeModal);
+    if (stakeCancel) stakeCancel.addEventListener('click', tryCloseStakeModal);
     if (stakeConfirm) stakeConfirm.addEventListener('click', confirmStake);
 }
 
@@ -595,27 +604,87 @@ async function confirmStake() {
     try {
         const input = document.getElementById('stake-amount-input');
         const checkbox = document.getElementById('stake-confirm-checkbox');
+        const confirmBtn = document.getElementById('stake-confirm-btn');
         if (!input) { gToast.error('Stake input missing'); return; }
-        const amount = parseFloat(input.value || '0');
+        const amountStr = (input.value || '').toString();
+        const amount = parseFloat(amountStr || '0');
         if (!amount || amount <= 0) { gToast.info('Please enter a valid amount to stake'); return; }
         if (!checkbox || !checkbox.checked) { gToast.info('Please confirm the lock period'); return; }
 
-        // Placeholder: call starknet manager to stake
-        gToast.info('Submitting stake transaction...');
-        try {
-            const res = await starknetManager.stake(amount);
-            gToast.success('Stake submitted. TX: ' + (res && res.transactionHash ? res.transactionHash : 'submitted'));
-        } catch (e) {
-            console.error('Stake failed', e);
-            gToast.error('Stake failed: ' + (e && e.message));
+        // Disable button and show loader text
+        const spinner = document.getElementById('stake-spinner');
+        const confirmText = document.getElementById('stake-confirm-text');
+        if (confirmBtn) {
+            confirmBtn.disabled = true;
+            confirmBtn.setAttribute('aria-busy', 'true');
+            confirmBtn.dataset.origText = confirmText ? confirmText.textContent : confirmBtn.textContent;
+            if (confirmText) confirmText.textContent = 'Staking...';
+            if (spinner) spinner.style.display = 'inline-block';
         }
 
-        const m = document.getElementById('stakeModal'); if (m) m.classList.remove('active');
-        // Refresh stake card info
-        setTimeout(() => updateStakeCard(), 1500);
+        gToast.info('Submitting stake transaction...');
+
+        // Get wallet address from background
+        const walletResp = await new Promise(r => chrome.runtime.sendMessage({ type: 'content:pageLoaded' }, r));
+        const walletAddress = (walletResp && (walletResp.result || walletResp.data) && (walletResp.result?.wallet || walletResp.data?.wallet)) || null;
+        if (!walletAddress || walletAddress === 'none') {
+            gToast.error('No wallet connected. Please connect your wallet in the extension first.');
+            if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.removeAttribute('aria-busy'); confirmBtn.textContent = confirmBtn.dataset.origText || 'Stake STRKS'; }
+            return;
+        }
+
+        // Convert amount to wei-like integer string for u256 (18 decimals)
+        function toWeiString(amountString, decimals = 18) {
+            const parts = (amountString || '0').split('.');
+            const whole = parts[0] || '0';
+            const frac = parts[1] || '';
+            const padded = (frac + '0'.repeat(decimals)).slice(0, decimals);
+            const weiStr = `${whole}${padded}`.replace(/^0+(?=\d)|^$/, '0');
+            // Trim leading zeros but ensure at least '0'
+            return weiStr === '' ? '0' : weiStr;
+        }
+
+        const weiAmountStr = toWeiString(amountStr, 18);
+
+        const writer = new SmartContractWriter('stake_for_' + Date.now(), 'stakes');
+
+        await writer.execute(
+            'stake_for_access',
+            { amount: weiAmountStr },
+            { amount: weiAmountStr, requestedAt: Date.now() },
+            walletAddress, // use walletAddress as storage key
+            walletAddress,
+            (result) => {
+                console.log('Stake successful', result);
+                gToast.success('Stake submitted. TX: ' + (result && result.transactionHash ? result.transactionHash : 'submitted'));
+                // close modal
+                const m = document.getElementById('stakeModal'); if (m) m.classList.remove('active');
+                // refresh stake info
+                setTimeout(() => updateStakeCard(), 1500);
+                if (confirmBtn) {
+                    confirmBtn.disabled = false;
+                    confirmBtn.removeAttribute('aria-busy');
+                    if (confirmText) confirmText.textContent = confirmBtn.dataset.origText || 'Stake STRKS';
+                    if (spinner) spinner.style.display = 'none';
+                }
+            },
+            (error) => {
+                console.error('Stake failed', error);
+                gToast.error('Stake failed: ' + (error && error.message ? error.message : JSON.stringify(error)));
+                if (confirmBtn) {
+                    confirmBtn.disabled = false;
+                    confirmBtn.removeAttribute('aria-busy');
+                    if (confirmText) confirmText.textContent = confirmBtn.dataset.origText || 'Stake STRKS';
+                    if (spinner) spinner.style.display = 'none';
+                }
+            }
+        );
+
     } catch (e) {
         console.warn('confirmStake error', e && e.message);
         gToast.error('Unable to stake: ' + (e && e.message));
+        const confirmBtn = document.getElementById('stake-confirm-btn');
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.removeAttribute('aria-busy'); if (confirmText) confirmText.textContent = confirmBtn.dataset.origText || 'Stake STRKS'; if (spinner) spinner.style.display = 'none'; }
     }
 }
 

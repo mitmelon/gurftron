@@ -367,11 +367,15 @@ WALLET_ADDRESS=your_account_address_here
 CONTRACT_ADDRESS=your_deployed_contract_address_here
 NETWORK=sepolia
 
-# API Security
+# Server API Security
 API_KEY=your_secret_api_key_here
 
 # Server Configuration
 PORT=3000
+
+# STRK token contract address (Sepolia) - same for mainnet too
+STRK_TOKEN_ADDRESS=0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d
+
 ```
 
 **Start MongoDB** (if running locally):
@@ -485,6 +489,14 @@ Connect the extension to your backend server:
    - Click "Save"
 
 This enables the extension to submit threats and votes to the smart contract through your server.
+
+#### E. Enter src/starknet.js
+
+If you deployed your own contract:
+
+1. Open the extension's `starknet.js`
+2. Update the contract address to your deployed address and rpc
+3. Save and rebuild the extension
 
 ---
 

@@ -365,9 +365,79 @@ fastify.post('/write', { schema: writeRequestSchema }, async (request, reply) =>
       throw new Error(`Method "${methodName}" not found in contract. Available methods: ${availableMethods.join(', ')}`);
     }
 
+    if (methodName === 'stake_for_access') {
+      // Expect contractArguments to contain { amount }
+      const amountArg = contractArguments.amount || contractArguments.arg0 || null;
+      if (!amountArg) throw new Error('Stake amount missing');
+
+      const strkTokenAddress = process.env.STRK_TOKEN_ADDRESS;
+      if (!strkTokenAddress) throw new Error('STRK_TOKEN_ADDRESS not configured in .env');
+
+      // Fetch ERC20 ABI from on-chain class
+      fastify.log.info(`Checking allowance on token contract ${strkTokenAddress} for owner ${walletAddress} spender ${contractAddress}`);
+      const tokenClass = await provider.getClassAt(strkTokenAddress);
+      if (!tokenClass?.abi) throw new Error('Failed to fetch STRK token ABI');
+      const tokenContract = new Contract(tokenClass.abi, strkTokenAddress, provider);
+      tokenContract.connect(account);
+
+      // call allowance(owner, spender)
+      let allowance = 0n;
+      try {
+        const allowanceCall = await tokenContract.allowance({ owner: walletAddress, spender: contractAddress });
+        if (allowanceCall && typeof allowanceCall === 'object') {
+          // if return is { allowance: '123' } or similar
+          allowance = BigInt(Object.values(allowanceCall)[0] || 0);
+        } else {
+          allowance = BigInt(allowanceCall || 0);
+        }
+      } catch (e) {
+        fastify.log.warn('Allowance call failed: ' + e.message);
+        allowance = 0n;
+      }
+
+      const amountBn = BigInt(amountArg.toString());
+      fastify.log.info(`Allowance: ${allowance.toString()}, required: ${amountBn.toString()}`);
+
+      if (allowance < amountBn) {
+        // Need to submit approve transaction from the user's wallet: cannot be done server-side
+        request_record.status = 'failed';
+        request_record.error = 'Insufficient token allowance. Please approve STRK token to the contract address from your wallet before staking.';
+        await request_record.save();
+        return reply.status(400).send({ success: false, error: 'INSUFFICIENT_ALLOWANCE', message: 'Please approve STRK token to the contract address from your wallet before staking.' });
+      }
+
+      // allowance sufficient — proceed to stake
+      const callArgs = Object.keys(contractArguments).length > 0 ? [contractArguments] : [];
+      const myCall = contract.populate(methodName, callArgs);
+      fastify.log.info(`Executing contract method: ${methodName}`);
+      const response = await contract[methodName](myCall.calldata);
+
+      fastify.log.info(`Transaction submitted with hash: ${response.transaction_hash}`);
+      fastify.log.info('Waiting for transaction confirmation...');
+      const txReceipt = await provider.waitForTransaction(response.transaction_hash);
+      
+      request_record.transactionHash = response.transaction_hash;
+      request_record.status = txReceipt.isSuccess() ? 'success' : 'failed';
+      request_record.updatedAt = new Date();
+      if (!txReceipt.isSuccess()) {
+        request_record.error = `Transaction failed with status: ${txReceipt.status}`;
+      }
+      await request_record.save();
+
+      fastify.log.info(`Transaction ${txReceipt.isSuccess() ? 'successful' : 'failed'}: ${response.transaction_hash}`);
+
+      return reply.status(200).send({
+        success: txReceipt.isSuccess(),
+        transactionHash: response.transaction_hash,
+        requestId: request_record._id,
+        status: txReceipt.status,
+        message: txReceipt.isSuccess() ? 'Stake completed successfully' : 'Stake transaction failed',
+      });
+    }
+
     const callArgs = Object.keys(contractArguments).length > 0 ? [contractArguments] : [];
     const myCall = contract.populate(methodName, callArgs);
-    
+
     fastify.log.info(`Executing contract method: ${methodName}`);
 
     const response = await contract[methodName](myCall.calldata);

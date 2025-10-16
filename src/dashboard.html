@@ -636,7 +636,10 @@
                     <input id="stake-confirm-checkbox" type="checkbox" class="rounded"> I understand my STRKS will be locked for 30 days
                 </label>
             </div>
-            <button id="stake-confirm-btn" class="btn-primary">Stake STRKS</button>
+            <button id="stake-confirm-btn" class="btn-primary">
+                <i id="stake-spinner" class="fas fa-spinner fa-spin mr-2" style="display:none"></i>
+                <span id="stake-confirm-text">Stake STRKS</span>
+            </button>
             <button id="stake-cancel-btn" class="btn-link mt-4 w-full py-2">Cancel</button>
         </div>
     </div>
