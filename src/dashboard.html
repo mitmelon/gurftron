@@ -459,9 +459,14 @@
                                     <p class="text-sm text-gray-500 mt-2">Earning rewards</p>
                                 </div>
                                 <div class="flex flex-col items-end space-y-2">
-                                    <a href="#" id="withdraw-stakes-link" class="text-sm font-semibold text-amber-600 hover:underline">
-                                        <i class="fas fa-arrow-up mr-2"></i>Withdraw Stakes
-                                    </a>
+                                    <div class="flex items-center space-x-3">
+                                        <a href="#" id="stake-strks-link" class="text-sm font-semibold text-indigo-600 hover:underline">
+                                            <i class="fas fa-hand-holding-usd mr-2"></i>Stake STRKS
+                                        </a>
+                                        <a href="#" id="withdraw-stakes-link" class="text-sm font-semibold text-amber-600 hover:underline">
+                                            <i class="fas fa-arrow-up mr-2"></i>Withdraw Stakes
+                                        </a>
+                                    </div>
                                     <div class="w-14 h-14 bg-gradient-to-br from-amber-100 to-orange-100 rounded-lg flex items-center justify-center">
                                         <i class="fas fa-bolt text-amber-600 text-2xl"></i>
                                     </div>
@@ -609,6 +614,33 @@
         <button id="withdraw-cancel-btn" class="btn-link mt-4 w-full py-2">Cancel</button>
     </div>
 </div>
+    <div id="stakeModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="text-2xl font-bold text-gray-900">Stake STRKS</h2>
+                    <button id="stake-close-btn" class="modal-close">×</button>
+                </div>
+                <div class="mb-6">
+                    <p class="text-gray-600 mb-4">Current balance: <span id="stake-current-balance" class="font-bold text-indigo-600">0 STRKS</span></p>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Amount to Stake</label>
+                    <input id="stake-amount-input" type="number" step="0.1" min="0" value="10" readonly class="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed">
+                </div>
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                    <p class="text-sm text-blue-900"><strong>Info:</strong> <i class="fas fa-info-circle mr-2"></i>Staked STRKS will be locked for 30 days and will not be withdrawable during the lock period.</p>
+                </div>
+                <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+                    <p class="text-sm text-yellow-900"><strong>Warning:</strong> <i class="fas fa-exclamation-triangle mr-2"></i>Your stake is collected to prevent spam and abusive behavior on the platform. It may be forfeited if used in violation of the rules.</p>
+                </div>
+                <label class="block mb-2">
+                    <input id="stake-confirm-checkbox" type="checkbox" class="rounded"> I understand my STRKS will be locked for 30 days
+                </label>
+            </div>
+            <button id="stake-confirm-btn" class="btn-primary">Stake STRKS</button>
+            <button id="stake-cancel-btn" class="btn-link mt-4 w-full py-2">Cancel</button>
+        </div>
+    </div>
     <script src="ui-helpers.js"></script>
     <script type="module" src="dashboard.js"></script>
+    
 </html>

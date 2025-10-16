@@ -508,6 +508,21 @@ function initLinks() {
             return false;
         });
     }
+
+    const stakeLink = document.getElementById('stake-strks-link');
+    if (stakeLink) {
+        stakeLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            const disabled = stakeLink.getAttribute('aria-disabled') === 'true';
+            if (disabled) {
+                gToast.info('Staking is currently disabled');
+                return false;
+            }
+            const modal = document.getElementById('stakeModal');
+            if (modal) modal.classList.add('active');
+            return false;
+        });
+    }
 }
 
 function openClaimModal() {
@@ -564,6 +579,44 @@ function initModalButtons() {
     if (withdrawClose) withdrawClose.addEventListener('click', closeWithdrawModal);
     if (withdrawCancel) withdrawCancel.addEventListener('click', closeWithdrawModal);
     if (withdrawConfirm) withdrawConfirm.addEventListener('click', confirmWithdraw);
+}
+
+// Stake modal wiring
+function initStakeModalButtons() {
+    const stakeClose = document.getElementById('stake-close-btn');
+    const stakeCancel = document.getElementById('stake-cancel-btn');
+    const stakeConfirm = document.getElementById('stake-confirm-btn');
+    if (stakeClose) stakeClose.addEventListener('click', () => { const m = document.getElementById('stakeModal'); if (m) m.classList.remove('active'); });
+    if (stakeCancel) stakeCancel.addEventListener('click', () => { const m = document.getElementById('stakeModal'); if (m) m.classList.remove('active'); });
+    if (stakeConfirm) stakeConfirm.addEventListener('click', confirmStake);
+}
+
+async function confirmStake() {
+    try {
+        const input = document.getElementById('stake-amount-input');
+        const checkbox = document.getElementById('stake-confirm-checkbox');
+        if (!input) { gToast.error('Stake input missing'); return; }
+        const amount = parseFloat(input.value || '0');
+        if (!amount || amount <= 0) { gToast.info('Please enter a valid amount to stake'); return; }
+        if (!checkbox || !checkbox.checked) { gToast.info('Please confirm the lock period'); return; }
+
+        // Placeholder: call starknet manager to stake
+        gToast.info('Submitting stake transaction...');
+        try {
+            const res = await starknetManager.stake(amount);
+            gToast.success('Stake submitted. TX: ' + (res && res.transactionHash ? res.transactionHash : 'submitted'));
+        } catch (e) {
+            console.error('Stake failed', e);
+            gToast.error('Stake failed: ' + (e && e.message));
+        }
+
+        const m = document.getElementById('stakeModal'); if (m) m.classList.remove('active');
+        // Refresh stake card info
+        setTimeout(() => updateStakeCard(), 1500);
+    } catch (e) {
+        console.warn('confirmStake error', e && e.message);
+        gToast.error('Unable to stake: ' + (e && e.message));
+    }
 }
 
 function formatTokenAmount(amountStr, decimals = 18, displayDecimals = 4) {
