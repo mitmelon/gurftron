@@ -227,7 +227,7 @@ impl LLMEngine {
         let context = model.new_context(&backend, ctx_params)
             .map_err(|e| format!("Context creation failed: {}", e))?;
         
-        info!("✅ LLM ready: {} (context: {})", config.name, context_size);
+        info!("LLM ready: {} (context: {})", config.name, context_size);
         
         Ok(Self {
             backend,
