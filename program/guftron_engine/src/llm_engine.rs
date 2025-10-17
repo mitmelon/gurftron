@@ -355,25 +355,3 @@ impl LLMEngine {
         self.model_config.clone()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_prompt_formatting() {
-        let messages = vec![
-            ChatMessage {
-                role: "system".to_string(),
-                content: "You are a helpful assistant.".to_string(),
-            },
-            ChatMessage {
-                role: "user".to_string(),
-                content: "Hello!".to_string(),
-            },
-        ];
-        
-        // Test would require actual engine instance
-        println!("Messages: {:?}", messages);
-    }
-}

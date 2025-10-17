@@ -522,17 +522,67 @@ class StarknetManager {
   async getThreatById(collection, id) {
     if (!(await this.isSystemActive())) throw new Error('System is paused');
     const contract = await this._getContract();
-
     const encodedCollection = shortString.encodeShortString(collection);
-    const encodedId = this._encodeIdForContract(id);
-    const [compressed, fields] = await contract.get(
-      encodedCollection,
-      encodedId
-    );
+
+    // Try multiple id representations to handle provider/ABI variations.
+    const candidates = [];
+    try {
+      // Prefer a single shortString encoding when possible
+      if (typeof id === 'string' && id.length <= 31) {
+        candidates.push(shortString.encodeShortString(id));
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    // Chunked encoding (array of encoded short-strings) - used if id is long
+    try {
+      const chunked = this._encodeIdForContract(id);
+      if (chunked !== undefined && chunked !== null) candidates.push(chunked);
+    } catch (e) { /* ignore */ }
+
+    // Raw string fallback
+    try { candidates.push(String(id)); } catch (e) { /* ignore */ }
+
+    // If id looks like hex, try BigInt
+    try {
+      if (typeof id === 'string' && /^0x[0-9a-fA-F]+$/.test(id)) {
+        candidates.push(BigInt(id));
+      }
+    } catch (e) { /* ignore */ }
+
+    let lastErr = null;
+    let chosenId = null;
+    let compressed, fields;
+    for (const cand of candidates) {
+      try {
+        const res = await contract.get(encodedCollection, cand);
+        if (res) {
+          [compressed, fields] = res;
+          chosenId = cand;
+          break;
+        }
+      } catch (err) {
+        lastErr = err;
+        const em = (err && err.message) || String(err || '');
+        // If provider complains about expected felt, try next candidate
+        if (/should be a felt|arg id should be a felt|invalid|invalid argument/i.test(em)) {
+          continue;
+        }
+        // If we get a not found / not approved style error, propagate it up
+        // but keep trying other candidates
+      }
+    }
+
+    if (!chosenId) {
+      // If no candidate succeeded, throw the last error or a generic error
+      if (lastErr) throw lastErr;
+      throw new Error('Failed to retrieve document by id');
+    }
     if (!compressed) return null;
     const status = await contract.get_document_validation_status(
       encodedCollection,
-      encodedId
+      chosenId
     );
     if (status !== shortString.encodeShortString('approved')) {
       throw new Error('Document not approved');
