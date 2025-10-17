@@ -115,7 +115,8 @@ const gToast = new CustomToast();
             threat.alreadyRegistered = true;
           }
         } catch (chainErr) {
-          //gToast.warning('Chain lookup failed (results page): ' + (chainErr && chainErr.message));
+          console.error('Chain lookup failed (results page):', chainErr);
+          try { gToast.warning('Chain lookup failed (results page): ' + (chainErr && chainErr.message)); } catch (_) {}
         }
       }
     } catch (e) {

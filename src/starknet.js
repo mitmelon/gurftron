@@ -9,7 +9,7 @@ const CONFIG = {
   NETWORK: {
     STARKNET: {
       TESTNET: {
-        PROVIDER_URL: 'https://starknet-sepolia.g.alchemy.com/starknet/version/rpc/',
+        PROVIDER_URL: 'https://starknet-sepolia.g.alchemy.com/starknet/version/rpc/v0_8/O2Um2MxXEjalg3IN4TeL3',
         CONTRACT_ADDRESS: '0x018cafa4fe61687014475b200f4641ddf8e01d42f3fd663a51f3d5ee19df964b'
       },
       MAINNET: {
@@ -522,14 +522,17 @@ class StarknetManager {
   async getThreatById(collection, id) {
     if (!(await this.isSystemActive())) throw new Error('System is paused');
     const contract = await this._getContract();
+
+    const encodedCollection = shortString.encodeShortString(collection);
+    const encodedId = this._encodeIdForContract(id);
     const [compressed, fields] = await contract.get(
-      shortString.encodeShortString(collection),
-      id
+      encodedCollection,
+      encodedId
     );
     if (!compressed) return null;
     const status = await contract.get_document_validation_status(
-      shortString.encodeShortString(collection),
-      id
+      encodedCollection,
+      encodedId
     );
     if (status !== shortString.encodeShortString('approved')) {
       throw new Error('Document not approved');
@@ -575,7 +578,7 @@ class StarknetManager {
     const [compressed, fields] = await contract.find_one(shortString.encodeShortString('whitelist'), query);
     if (!compressed) return null;
     const data = JSON.parse(LZString.decompressFromUTF16(compressed));
-    const status = await contract.get_document_validation_status(shortString.encodeShortString('whitelist'), data.id);
+    const status = await contract.get_document_validation_status(shortString.encodeShortString('whitelist'), this._encodeIdForContract(data.id));
     if (status !== shortString.encodeShortString('approved')) {
       throw new Error('Whitelist entry not approved');
     }
@@ -610,37 +613,32 @@ class StarknetManager {
     return await contract.is_account_registered(address);
   }
 
-  async submitWhitelistRequest(collection, url, reason) {
-    await this._ensureWriteAccess();
-    if (!(await this.isSystemActive())) throw new Error('System is paused');
-    const canInsert = await this._canPerformAction('insert');
-    if (!canInsert) throw new Error('Cannot insert');
-
-    const compressed = LZString.compressToUTF16(JSON.stringify({ url, reason }));
-    if (compressed.length * 2 > CONFIG.STORAGE.MAX_COMPRESSED_SIZE) {
-      throw new Error(`Whitelist data too large`);
-    }
-    const fields = [
-      [shortString.encodeShortString('url'), shortString.encodeShortString(url)],
-      [shortString.encodeShortString('status'), shortString.encodeShortString('pending')]
-    ];
-    const contract = await this._getContract();
-    const call = contract.populate('insert', [
-      shortString.encodeShortString(collection),
-      compressed,
-      fields
-    ]);
-    const res = await this._executeTransaction(call);
-    await this._waitForTransaction(res.transaction_hash);
-    return { success: true, transactionHash: res.transaction_hash };
-  }
-
   async _canPerformAction(actionType) {
     await this._ensureWriteAccess();
     const contract = await this._getContract();
     const encoded = shortString.encodeShortString(actionType);
     const result = await contract.can_perform_action(this.account.address, encoded);
     return !!result;
+  }
+
+  // Helper to normalize document ids for contract calls.
+  // shortString.encodeShortString requires <=31-char strings. Long ids (e.g. SHA256 hex) are
+  // split into 31-char chunks and each chunk is encoded. Numeric or bigint ids are returned as-is.
+  _encodeIdForContract(docId) {
+    if (docId === null || typeof docId === 'undefined') return docId;
+    if (Array.isArray(docId)) return docId;
+    if (typeof docId === 'bigint' || typeof docId === 'number') return docId;
+    const s = String(docId);
+    if (s.length <= 31) {
+      try {
+        return shortString.encodeShortString(s);
+      } catch (e) {
+        // fallthrough to splitting
+      }
+    }
+    const parts = [];
+    for (let i = 0; i < s.length; i += 31) parts.push(s.slice(i, i + 31));
+    return parts.map(p => shortString.encodeShortString(p));
   }
 
   async getPoints(wallet) {
@@ -658,65 +656,6 @@ class StarknetManager {
     await this._ensureWriteAccess();
     const contract = await this._getContract();
     return await contract.get_is_user_premium(this.account.address);
-  }
-
-  async claimRewards() {
-    await this._ensureWriteAccess();
-    if (!(await this.isSystemActive())) throw new Error('System is paused');
-    const contract = await this._getContract();
-    const call = contract.populate('claim_reward', []);
-    const res = await this._executeTransaction(call);
-    await this._waitForTransaction(res.transaction_hash);
-    return { success: true, transactionHash: res.transaction_hash };
-  }
-
-  async voteOnDocument(collection, documentId, isValid) {
-    await this._ensureWriteAccess();
-    if (!(await this.isSystemActive())) throw new Error('System is paused');
-    const contract = await this._getContract();
-    const canVote = await contract.can_vote_on_document(
-      this.account.address,
-      shortString.encodeShortString(collection),
-      documentId
-    );
-    if (!canVote) throw new Error('Cannot vote on this document');
-    const call = contract.populate('vote_on_document', [
-      shortString.encodeShortString(collection),
-      documentId,
-      isValid ? 1n : 0n
-    ]);
-    const res = await this._executeTransaction(call);
-    await this._waitForTransaction(res.transaction_hash);
-    return { success: true, transactionHash: res.transaction_hash };
-  }
-
-  async reportMaliciousData(collection, documentId, reason) {
-    await this._ensureWriteAccess();
-    if (!(await this.isSystemActive())) throw new Error('System is paused');
-    const canReport = await this._canPerformAction('report_malicious');
-    if (!canReport) throw new Error('Cannot report');
-
-    const contract = await this._getContract();
-    const call = contract.populate('report_malicious_data', [
-      shortString.encodeShortString(collection),
-      documentId,
-      shortString.encodeShortString(reason)
-    ]);
-    const res = await this._executeTransaction(call);
-    await this._waitForTransaction(res.transaction_hash);
-    return { success: true, transactionHash: res.transaction_hash };
-  }
-
-  async stakeForAccess(amount) {
-    await this._ensureWriteAccess();
-    if (!(await this.isSystemActive())) throw new Error('System is paused');
-    const bn = BigInt(amount);
-    const u256 = { low: bn & 0xFFFFFFFFFFFFFFFFn, high: bn >> 128n };
-    const contract = await this._getContract();
-    const call = contract.populate('stake_for_access', [u256]);
-    const res = await this._executeTransaction(call);
-    await this._waitForTransaction(res.transaction_hash);
-    return { success: true, transactionHash: res.transaction_hash };
   }
 
   async getStakeInfo(address) {
@@ -747,16 +686,6 @@ class StarknetManager {
     };
   }
 
-  async withdrawStake() {
-    await this._ensureWriteAccess();
-    if (!(await this.isSystemActive())) throw new Error('System is paused');
-    const contract = await this._getContract();
-    const call = contract.populate('withdraw_stake', []);
-    const res = await this._executeTransaction(call);
-    await this._waitForTransaction(res.transaction_hash);
-    return { success: true, transactionHash: res.transaction_hash };
-  }
-
   async getUserSecurityProfile() {
     await this._ensureWriteAccess();
     const contract = await this._getContract();
@@ -784,8 +713,9 @@ class StarknetManager {
     const ids = await contract.find(shortString.encodeShortString(collection), query, page);
     const results = await Promise.allSettled(ids.map(async (id) => {
       try {
-        const [compressed, fields] = await contract.get(shortString.encodeShortString(collection), id);
-        const status = await contract.get_document_validation_status(shortString.encodeShortString(collection), id);
+        const encId = this._encodeIdForContract(id);
+        const [compressed, fields] = await contract.get(shortString.encodeShortString(collection), encId);
+        const status = await contract.get_document_validation_status(shortString.encodeShortString(collection), encId);
         if (status !== shortString.encodeShortString('approved')) return null;
         const data = JSON.parse(LZString.decompressFromUTF16(compressed));
         return {
@@ -802,60 +732,6 @@ class StarknetManager {
       .map(r => r.value);
   }
 
-  async createCollection(name, indexedFields) {
-    await this._ensureWriteAccess();
-    if (!(await this.isSystemActive())) throw new Error('System is paused');
-    const canCreate = await this._canPerformAction('create_collection');
-    if (!canCreate) throw new Error('Cannot create collection');
-
-    const contract = await this._getContract();
-    const call = contract.populate('create_collection', [
-      shortString.encodeShortString(name),
-      indexedFields.map(f => shortString.encodeShortString(f))
-    ]);
-    const res = await this._executeTransaction(call);
-    await this._waitForTransaction(res.transaction_hash);
-    return { success: true, transactionHash: res.transaction_hash };
-  }
-
-  async updateDocument(collection, id, data, fields) {
-    await this._ensureWriteAccess();
-    if (!(await this.isSystemActive())) throw new Error('System is paused');
-    const canUpdate = await this._canPerformAction('update');
-    if (!canUpdate) throw new Error('Cannot update');
-
-    const compressed = LZString.compressToUTF16(JSON.stringify(data));
-    if (compressed.length * 2 > CONFIG.STORAGE.MAX_COMPRESSED_SIZE) {
-      throw new Error('Data too large');
-    }
-    const encodedFields = fields.map(([k, v]) => [shortString.encodeShortString(k), shortString.encodeShortString(v)]);
-    const contract = await this._getContract();
-    const call = contract.populate('update', [
-      shortString.encodeShortString(collection),
-      id,
-      compressed,
-      encodedFields
-    ]);
-    const res = await this._executeTransaction(call);
-    await this._waitForTransaction(res.transaction_hash);
-    return { success: true, transactionHash: res.transaction_hash };
-  }
-
-  async deleteDocument(collection, id) {
-    await this._ensureWriteAccess();
-    if (!(await this.isSystemActive())) throw new Error('System is paused');
-    const canDelete = await this._canPerformAction('delete');
-    if (!canDelete) throw new Error('Cannot delete');
-
-    const contract = await this._getContract();
-    const call = contract.populate('delete', [
-      shortString.encodeShortString(collection),
-      id
-    ]);
-    const res = await this._executeTransaction(call);
-    await this._waitForTransaction(res.transaction_hash);
-    return { success: true, transactionHash: res.transaction_hash };
-  }
 }
 
 export {

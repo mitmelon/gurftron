@@ -660,10 +660,57 @@ async function executeSingleGeminiRequest(prompt, apiKey) {
 
     // Generate content
     console.log('[Gurftron] 📤 Sending prompt to Gemini...');
-    const result = await model.generateContent(prompt + '. Please result should be only in json with no explanations. just json.');
-    const response = await result.response;
-    const text = response.text();
-    console.log('[Gurftron] 📥 Gemini raw response:', text.substring(0, 500));
+    let response, text;
+    try {
+      const result = await model.generateContent(prompt + '. Please result should be only in json with no explanations. just json.');
+      response = await result.response;
+      text = response.text();
+      console.log('[Gurftron] 📥 Gemini raw response:', text.substring(0, 500));
+    } catch (err) {
+      // Heuristic detection for quota / retry info and persist a cooldown
+      try {
+        console.error('[Gurftron] ❌ Gemini SDK error:', err && (err.message || err.toString && err.toString()));
+      } catch (e) {}
+
+      // Try to extract a retry delay from the error message (e.g. "Please retry in 48.84s")
+      let retrySeconds = null;
+      const emsg = (err && (err.message || (err.toString && err.toString()))) || '';
+      const m = emsg.match(/retry(?:.*?in)?\s*([0-9]+(?:\.[0-9]+)?)s/i) || emsg.match(/(\d+(?:\.[0-9]+)?)s/);
+      if (m) retrySeconds = parseFloat(m[1]);
+
+      // Fallback heuristics for common quota messages
+      if (!retrySeconds && /quota|exceeded|429|rate limit|rate-limit/i.test(emsg)) {
+        // default to 60s when we detect a quota-like message but no explicit RetryInfo
+        retrySeconds = 60;
+      }
+
+      if (retrySeconds) {
+        const cooldownMs = Math.ceil(retrySeconds * 1000) + 500;
+        const until = Date.now() + cooldownMs;
+        try {
+          await chrome.storage.local.set({ geminiCooldownUntil: until });
+          console.warn(`[Gurftron] ⚠️ Gemini quota detected — pausing Gemini requests until ${new Date(until).toISOString()} (${retrySeconds}s)`);
+        } catch (e) {
+          console.warn('[Gurftron] ⚠️ Failed to persist geminiCooldownUntil to storage', e);
+        }
+
+        // If a queue exists, schedule a pump to try again after the cooldown
+        try {
+          const q = globalThis._gurftronLLMQueue;
+          if (q) {
+            setTimeout(() => {
+              // Try to restart some pumps when cooldown expires
+              for (let i = 0; i < (q.maxConcurrency || 2); i++) {
+                try { if (typeof pump === 'function') pump(); } catch (e) { /* ignore */ }
+              }
+            }, cooldownMs + 200);
+          }
+        } catch (e) { /* ignore */ }
+      }
+
+      // Re-throw so the queue/promise handlers can handle the failure path
+      throw err;
+    }
 
     // Parse JSON response
     try {
@@ -700,31 +747,46 @@ async function executeSingleGeminiRequest(prompt, apiKey) {
     }
   };
 
-  // Queue system
-  return await new Promise((resolve, reject) => {
-    const q = globalThis._gurftronLLMQueue || (globalThis._gurftronLLMQueue = { queue: [], running: 0, maxConcurrency: 2 });
-    q.queue.push({ runRequest, resolve, reject });
+    // Queue system
+    return await new Promise((resolve, reject) => {
+      const q = globalThis._gurftronLLMQueue || (globalThis._gurftronLLMQueue = { queue: [], running: 0, maxConcurrency: 2 });
+      q.queue.push({ runRequest, resolve, reject });
 
-    const pump = async () => {
-      if (q.running >= q.maxConcurrency || !q.queue.length) return;
-      const item = q.queue.shift();
-      q.running++;
-      try {
-        console.log(`[Gurftron] Processing queue item (${q.running}/${q.maxConcurrency})...`);
-        const res = await item.runRequest();
-        console.log('[Gurftron] ✅ Queue item completed:', res);
-        item.resolve(res);
-      } catch (err) {
-        console.error('[Gurftron] ❌ Queue item failed:', err);
-        item.reject(err);
-      } finally {
-        q.running--;
-        setTimeout(pump, 0);
-      }
-    };
+      const pump = async () => {
+        // Check for global Gemini cooldown in storage
+        try {
+          const s = await chrome.storage.local.get(['geminiCooldownUntil']);
+          const until = s && s.geminiCooldownUntil ? s.geminiCooldownUntil : 0;
+          if (until && until > Date.now()) {
+            const wait = until - Date.now() + 100;
+            console.log('[Gurftron] ⏸️ Gemini cooling — pausing queue for', wait, 'ms');
+            setTimeout(pump, wait);
+            return;
+          }
+        } catch (e) {
+          // If storage read fails, continue processing (best-effort)
+          console.warn('[Gurftron] ⚠️ Failed to read geminiCooldownUntil from storage', e);
+        }
 
-    for (let i = 0; i < q.maxConcurrency; i++) pump();
-  });
+        if (q.running >= q.maxConcurrency || !q.queue.length) return;
+        const item = q.queue.shift();
+        q.running++;
+        try {
+          console.log(`[Gurftron] Processing queue item (${q.running}/${q.maxConcurrency})...`);
+          const res = await item.runRequest();
+          console.log('[Gurftron] ✅ Queue item completed:', res);
+          item.resolve(res);
+        } catch (err) {
+          console.error('[Gurftron] ❌ Queue item failed:', err);
+          item.reject(err);
+        } finally {
+          q.running--;
+          setTimeout(pump, 0);
+        }
+      };
+
+      for (let i = 0; i < q.maxConcurrency; i++) pump();
+    });
 }
 
 

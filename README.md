@@ -1,3 +1,4 @@
+
 <div align="center">
   
   <img src="src/images/logo.png" alt="Gurftron Logo" width="200"/>
@@ -19,6 +20,18 @@
   **🌐 [Visit Our Website](https://gurftron.work.gd)** | **📖 [Documentation](#-getting-started)** | **💬 [Report Issues](https://github.com/mitmelon/gurftron/issues)**
   
 </div>
+ 
+---
+
+> ### ⚠️ Work in Progress — Unstable
+>
+> This project is under active development and may contain bugs or breaking changes.
+>
+> Estimated time to a user-ready release: **November - December 2025**.
+>
+> Use for testing and development only. Do not rely on this for production protection.
+
+---
 
 ## 🌟 About
 
