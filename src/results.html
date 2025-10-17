@@ -173,6 +173,14 @@
         <p id="summary" class="text-lg text-gray-700 leading-relaxed mb-4">
           Loading details…
         </p>
+        <div id="pageMeta" class="text-sm text-gray-600 mb-4">
+          <div><strong>Page:</strong> <a id="pageLink" href="#" target="_blank" rel="noopener noreferrer"><span id="pageDomain">—</span></a></div>
+          <div>
+            <strong>Detected by:</strong>
+            <span id="detectedSource">—</span>
+            <i id="detectedSourceIcon" class="fas fa-info-circle ml-2" title="Detection sources" style="color:#9CA3AF; cursor:help"></i>
+          </div>
+        </div>
       </div>
 
       <div class="details-box">
@@ -185,7 +193,7 @@
 
       <div class="flex flex-col sm:flex-row gap-3 justify-center mb-4 mt-6">
         <button id="leaveBtn" class="btn-primary cursor-pointer">
-          <i class="fas fa-sign-out-alt mr-2"></i>Leave Site (Recommended)
+          <i class="fas fa-sign-out-alt mr-2"></i>Leave Site
         </button>
         <button id="blockBtn" class="btn-danger cursor-pointer">
           <i class="fas fa-ban mr-2"></i>Block Site (On-chain)
@@ -193,9 +201,6 @@
       </div>
       
       <div class="flex flex-col sm:flex-row gap-3 justify-center mb-4">
-        <button id="openDash" class="btn-secondary cursor-pointer">
-          <i class="fas fa-tachometer-alt mr-2"></i>Open Dashboard
-        </button>
         <button id="continueBtn" class="btn-ghost cursor-pointer">
           <i class="fas fa-arrow-right mr-2"></i>Continue Anyway
         </button>

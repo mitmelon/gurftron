@@ -16,6 +16,95 @@ const gToast = new CustomToast();
     setText('headline', threat.title || 'Threat detected — take action');
     setText('summary', threat.userSummary || threat.evidenceSummary || threat.detectedContent || 'This page was flagged by Gurftron.');
     setText('details', (threat.details || threat.evidenceSummary || threat.detectedContent || JSON.stringify(threat, null, 2)));
+    // Populate page domain and detection source
+    try {
+      const extractDomain = (u) => {
+        try { return new URL(u).hostname.replace(/^www\./, ''); } catch (e) {
+          if (!u) return '';
+          return (u + '').replace(/^https?:\/\/(www\.)?/, '').split('/')[0];
+        }
+      };
+      const rawUrl = threat.domain || threat.page || threat.url || '';
+      const domain = rawUrl ? extractDomain(rawUrl) : '';
+
+      // Build a user-friendly detected source label
+      const sourceFromSignals = (threat.triggeredSignals && Array.isArray(threat.triggeredSignals)) ? threat.triggeredSignals.map(s => s.source).filter(Boolean) : [];
+      const rawSource = threat.source || threat.detectedBy || (sourceFromSignals.length ? sourceFromSignals.join(',') : (threat.detectedSource || 'gurftron'));
+
+      const SOURCE_PRETTY = {
+        'google_safe_browsing': 'Google Safe Browsing',
+        'brave_search_llm_analysis': 'Brave Deep Search',
+        'llm_reasoning': 'LLM Reasoning',
+        'llm_network_script': 'LLM Network Script Analysis',
+        'llm_noisy_trackers': 'Tracker Heuristics',
+        'domain_llm_analysis': 'Domain LLM Analysis',
+        'content.js': 'Content Script',
+        'gurftron': 'Gurftron Detector'
+      };
+
+      const prettyFromKey = (k) => {
+        if (!k) return '';
+        // If multiple keys comma-separated, map each
+        return k.split(',').map(x => SOURCE_PRETTY[x] || // common mapping
+          // fallback: prettify snake_case or dotted keys
+          x.replace(/[_\.]/g, ' ').replace(/(^|\s)\S/g, s => s.toUpperCase())
+        ).join(', ');
+      };
+
+      const prettySource = prettyFromKey(rawSource);
+
+      // Set page link and domain text
+      const pageLinkEl = document.getElementById('pageLink');
+      const pageDomainEl = document.getElementById('pageDomain');
+      if (pageDomainEl) pageDomainEl.textContent = domain || rawUrl || 'Unknown';
+      if (pageLinkEl) {
+        try {
+          pageLinkEl.href = rawUrl || '#';
+        } catch (e) {
+          pageLinkEl.href = '#';
+        }
+
+        // When clicked, attempt to focus the original tab (if we have a tabId)
+        pageLinkEl.addEventListener('click', (ev) => {
+          try {
+            ev.preventDefault();
+            const targetUrl = rawUrl || threat.url || pageLinkEl.href || '';
+            if (threat && typeof threat.tabId === 'number') {
+              try {
+                chrome.runtime.sendMessage({ action: 'focus_tab', tabId: threat.tabId }, (resp) => {
+                  try {
+                    if (!resp || !resp.ok) {
+                      // Fallback: open in new tab
+                      try { window.open(targetUrl || '_blank'); } catch (e) {}
+                    }
+                  } catch (e) {
+                    try { window.open(targetUrl || '_blank'); } catch (err) {}
+                  }
+                });
+                return;
+              } catch (e) {
+                // continue to fallback below
+              }
+            }
+            try { window.open(targetUrl || '_blank'); } catch (e) {}
+          } catch (e) { /* ignore click errors */ }
+        });
+      }
+
+      // Set detected source text and tooltip
+      setText('detectedSource', prettySource || 'Gurftron Detector');
+      const srcIcon = document.getElementById('detectedSourceIcon');
+      if (srcIcon) {
+        const tooltipParts = [];
+        tooltipParts.push('Detected sources:');
+        // list normalized sources (raw and pretty)
+        tooltipParts.push(`Raw: ${rawSource}`);
+        tooltipParts.push(`Pretty: ${prettySource}`);
+        srcIcon.title = tooltipParts.join('\n');
+      }
+    } catch (e) {
+      // ignore UI population errors
+    }
 
     try {
       if (threat && threat.id) {
@@ -137,7 +226,7 @@ const gToast = new CustomToast();
               confidence: threat.confidence,
               reportedBy: walletAddress,
               reportedAt: Date.now(),
-              validationStatus: 'pending',  // Cairo documents start as pending
+              validationStatus: 'pending',
               alreadyRegistered: true
             },
             threat.id,          // Storage key
