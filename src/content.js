@@ -440,7 +440,17 @@ class GurftronThreatDetector {
 
   async collectPageData(eventOrMutation) {
     const cacheKey = `page_collection_${this.currentUrl}`;
-    if (this.isResourceCached(cacheKey)) return null;
+        const capSnapshot = (s, max = 16000) => {
+          try {
+            if (!s) return '';
+            if (typeof s !== 'string') s = JSON.stringify(s);
+            if (s.length <= max) return s;
+            const head = s.slice(0, Math.floor(max / 2));
+            const tail = s.slice(-Math.floor(max / 2));
+            return `${head}\n...[TRUNCATED ${s.length - max} chars]...\n${tail}`;
+          } catch (e) { return String(s).slice(0, max); }
+        };
+        const evidenceText = evidences.join('\n') + `\nFull text snapshot: ${capSnapshot(text)}`;
     this.markResourceScanned(cacheKey);
 
     const pageData = {
@@ -1574,7 +1584,7 @@ class GurftronThreatDetector {
     if (!this.shouldAllowHeavyLLMForResource(domain, resourceKey)) {
       this.log('info', `Skipping Brave deep search for resource due to cooldown: ${resourceKey} on ${domain}`);
       // fall back to original DOM analysis
-      const evidenceText = evidences.join('\n') + `\nFull text snapshot: ${text.slice(0, 4000)}`;
+  const evidenceText = evidences.join('\n') + `\nFull text snapshot: ${capSnapshot(text)}`;
       const prompt = `Analyze DOM text for phishing keywords, urgency tactics, credential requests: ${evidenceText}`;
       const domResult = await this.analyzeWithLLM(prompt, 'dom_threats');
       const domThreat = domResult.threat;
@@ -1622,7 +1632,7 @@ class GurftronThreatDetector {
 
         // Prepare compact samples for comparison to keep prompts small
         const sampleOriginal = text.slice(0, 2000);
-        const sampleCandidate = (typeof candSnippet === 'string' ? candSnippet : JSON.stringify(candSnippet || '')).slice(0, 4000);
+  const sampleCandidate = capSnapshot(typeof candSnippet === 'string' ? candSnippet : JSON.stringify(candSnippet || ''), 16000);
 
         const comparePrompt = `You are a senior cybersecurity analyst. Compare the ORIGINAL page and the CANDIDATE page and determine if the CANDIDATE is impersonating the ORIGINAL. Return ONLY a JSON object with exactly: {"isImpersonation": boolean, "confidence": number (0.0-1.0), "reasons": string[] }.\n\nORIGINAL_URL: ${this.currentUrl}\nORIGINAL_TITLE: ${document.title || 'N/A'}\nORIGINAL_SNIPPET: ${sampleOriginal}\n\nCANDIDATE_URL: ${candUrl}\nCANDIDATE_SNIPPET: ${sampleCandidate}`;
 
@@ -1657,7 +1667,7 @@ class GurftronThreatDetector {
     }
 
     // If no impersonation candidates were found/flagged, fall back to the original DOM analysis
-    const evidenceText = evidences.join('\n') + `\nFull text snapshot: ${text.slice(0, 4000)}`;
+  const evidenceText = evidences.join('\n') + `\nFull text snapshot: ${capSnapshot(text)}`;
     const prompt = `Analyze DOM text for phishing keywords, urgency tactics, credential requests: ${evidenceText}`;
     const domResult = await this.analyzeWithLLM(prompt, 'dom_threats');
     const domThreat = domResult.threat;
@@ -1911,9 +1921,20 @@ class GurftronThreatDetector {
   }
 
   async createThreatJson(url, detectedContent, type, severity, hash = null, filePath = null, evidenceSummary = '') {
+    // Keep the full detectedContent (no aggressive truncation) so the
+    // final LLM-produced userSummary/evidenceSummary can be preserved
+    // for display in the results UI. Convert non-strings to JSON safely.
+    let safeDetected = '';
+    try {
+      if (typeof detectedContent === 'string') safeDetected = detectedContent;
+      else safeDetected = JSON.stringify(detectedContent || '');
+    } catch (e) {
+      safeDetected = String(detectedContent || '');
+    }
+
     return {
       url,
-      detectedContent: detectedContent.slice(0, 500),
+      detectedContent: safeDetected,
       time: new Date().toISOString(),
       severity,
       fullContentHash: hash,

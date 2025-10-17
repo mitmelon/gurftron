@@ -1003,8 +1003,15 @@ async function getLinkSnippet(url) {
     } catch (sanErr) {
       // ignore sanitization errors
     }
-    // Limit size to 4000 chars to avoid huge payloads going back to content script
-    if (text && text.length > 4000) text = text.slice(0, 4000);
+    // Avoid overly large payloads being sent back to content script.
+    // Keep a generous cap (16KB) but prefer returning full text where feasible
+    // so downstream LLM summaries can use the complete snippet for quality.
+    try {
+      const MAX_CHARS = 16000; // conservative upper bound for snippet length
+      if (text && text.length > MAX_CHARS) {
+        text = text.slice(0, MAX_CHARS);
+      }
+    } catch (e) { /* ignore sizing errors */ }
     return text;
   } catch (error) {
     await logErrorToDB(error, 'getLinkSnippet');
