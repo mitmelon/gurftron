@@ -63,6 +63,31 @@ Virus Definitions
 
 The engine receives JSON messages via stdin, processes scan requests, communicates with ClamAV over TCP (port 3310), stores results in SQLite, and returns JSON responses via stdout.
 
+## Local LLM (llama.cpp) support
+
+Starting with v2.2 the engine can optionally initialize a local LLM (via the `llama_cpp_2` bindings) to assist with advanced threat reasoning, artifact classification, and natural-language summaries. The local LLM is embedded in the native engine and will be initialized on demand.
+
+Key points:
+- The LLM subsystem downloads model GGUF files from configured Hugging Face repositories into `{model_dir}` (default: `~/.cache/gurftron/models/`).
+- Available model presets (auto-detected by RAM): TinyLlama-1.1B, Phi-2-2.7B, Mistral-7B-Instruct, Llama-3-8B-Instruct. The engine selects the largest model that fits available RAM.
+- The LLM uses `llama_cpp_2` and a native backend that requires platform toolchain support (CMake + LLVM). See the Prerequisites above.
+- The LLM produces structured completions as JSON-style objects used by the rest of the engine. The engine exposes limited LLM completions via native messaging (use action `llm_complete` with messages payload).
+
+Initialize the LLM (manual):
+
+```bash
+# From the engine directory
+RUST_LOG=info cargo run --release -- --init-llm
+```
+
+Or let the engine auto-initialize on first request; the initial model download can be large and may take significant time.
+
+Runtime notes:
+- Ensure you have enough RAM for the selected model (the engine will select a model based on available RAM).
+- Downloads are performed with resumable streams and show a progress bar.
+- If you need to prevent LLM initialization, set the environment variable `GURFTRON_DISABLE_LLM=1` before running the engine.
+
+
 ## Building the Program
 
 ### Prerequisites
@@ -86,6 +111,12 @@ Verify installation:
 rustc --version
 cargo --version
 ```
+
+Important build dependencies for native/model backends:
+- CMake: required to build some native C/C++ crates (for example the llama.cpp bindings used by the local LLM engine). Download: https://cmake.org/download/
+- LLVM: required by some model/backends and native toolchains used by `llama_cpp_2` and related crates. Download: https://github.com/llvm/llvm-project/releases
+
+If you see errors building the Rust program (linker or C bindings failures), make sure CMake and LLVM are installed and available on your PATH before building.
 
 ### Building for Development
 
