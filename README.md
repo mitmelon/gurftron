@@ -734,7 +734,7 @@ We welcome contributions! Here's how:
 - **ClamAV not starting**: Manually install ClamAV for your OS
 - **Native messaging error**: Re-run the engine to re-register
 - **Port 3310 busy**: Another ClamAV instance is running, restart it
-- **Rust program not compiling**: Make sure you have [`https://cmake.org/download/`](CMAKE) and [`https://github.com/llvm/llvm-project/releases`](LLVM) Installed on your computer.
+- **Rust program not compiling**: Make sure you have [`CMAKE`](https://cmake.org/download/) and [`LLVM`](https://github.com/llvm/llvm-project/releases) Installed on your computer.
 - See [`program/guftron_engine/README.md`](program/guftron_engine/README.md) for detailed troubleshooting
 
 ### Smart Contract Issues
