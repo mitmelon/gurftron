@@ -768,7 +768,7 @@ We welcome contributions! Here's how:
 - [x] Starknet smart contract with voting system
 - [x] Chrome extension with wallet integration
 - [ ] Vesu integration for rewards sustainability
-- [ ] Local ML models for privacy users
+- [x] Local ML models for privacy users
 - [ ] Whitelist inclusion
 - [ ] Deep fake detection in video & images
 - [ ] Mobile app (React Native)
