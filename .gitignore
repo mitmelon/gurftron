@@ -1,5 +1,6 @@
 # Directories
 node_modules/
+program/gurftron_engine/target/
 
 # Files
 key_seed.txt

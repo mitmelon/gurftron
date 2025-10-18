@@ -4,20 +4,18 @@
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use sysinfo::{System, SystemExt};
+use sysinfo::System;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::Mutex;
 use futures_util::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 use std::time::{Duration, Instant};
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
-use llama_cpp_2::model::{LlamaModel, AddBos};
-use llama_cpp_2::context::LlamaContext;
+use llama_cpp_2::model::{LlamaModel, AddBos, Special};
 use llama_cpp_2::token::data_array::LlamaTokenDataArray;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,7 +31,7 @@ pub struct ModelConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
-    pub role: String, // "system", "user", "assistant"
+    pub role: String,
     pub content: String,
 }
 
@@ -81,7 +79,6 @@ fn default_top_p() -> f32 { 0.9 }
 pub struct LLMEngine {
     backend: LlamaBackend,
     model: Arc<LlamaModel>,
-    context: Arc<Mutex<LlamaContext>>,
     model_config: ModelConfig,
     context_size: u32,
 }
@@ -131,12 +128,9 @@ impl LLMEngine {
     pub fn detect_best_model() -> ModelConfig {
         let mut sys = System::new_all();
         sys.refresh_all();
-        
         let total_ram_gb = sys.total_memory() / (1024 * 1024 * 1024);
         let usable_ram = total_ram_gb.saturating_sub(2);
-        
         info!("System RAM: {} GB total, selecting model for {} GB", total_ram_gb, usable_ram);
-        
         let models = Self::get_available_models();
         for model in models.iter().rev() {
             if model.min_ram_gb <= usable_ram {
@@ -144,7 +138,6 @@ impl LLMEngine {
                 return model.clone();
             }
         }
-        
         warn!("Using smallest model due to low RAM");
         models[0].clone()
     }
@@ -152,7 +145,6 @@ impl LLMEngine {
     pub async fn download_model(config: &ModelConfig, target_dir: &Path) -> Result<PathBuf, Box<dyn Error + Send + Sync>> {
         fs::create_dir_all(target_dir).await?;
         let model_path = target_dir.join(&config.filename);
-        
         if model_path.exists() {
             let file_size = fs::metadata(&model_path).await?.len();
             let expected_size = (config.size_mb as u64) * 1024 * 1024;
@@ -162,21 +154,17 @@ impl LLMEngine {
             }
             fs::remove_file(&model_path).await.ok();
         }
-        
         let url = format!("https://huggingface.co/{}/resolve/main/{}", config.repo_id, config.filename);
         info!("Downloading {} from: {}", config.name, url);
-        
         let client = reqwest::Client::builder()
             .user_agent("Gurftron-LLM/2.2")
             .timeout(Duration::from_secs(3600))
             .tcp_nodelay(true)
             .build()?;
-        
         let response = client.get(&url).send().await?;
         if !response.status().is_success() {
             return Err(format!("Download failed: HTTP {}", response.status()).into());
         }
-        
         let total_size = response.content_length().unwrap_or(config.size_mb as u64 * 1024 * 1024);
         let pb = ProgressBar::new(total_size);
         pb.set_style(
@@ -185,18 +173,15 @@ impl LLMEngine {
                 .progress_chars("#>-")
         );
         pb.set_message(format!("Downloading {}", config.name));
-        
         let mut file = fs::File::create(&model_path).await?;
         let mut downloaded: u64 = 0;
         let mut stream = response.bytes_stream();
-        
         while let Some(chunk) = stream.next().await {
             let chunk = chunk?;
             file.write_all(&chunk).await?;
             downloaded += chunk.len() as u64;
             pb.set_position(downloaded);
         }
-        
         pb.finish_with_message(format!("Downloaded {}", config.name));
         Ok(model_path)
     }
@@ -204,35 +189,26 @@ impl LLMEngine {
     pub async fn new(model_dir: &Path) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let config = Self::detect_best_model();
         let model_path = Self::download_model(&config, model_dir).await?;
-        
         info!("Loading model into memory...");
         let backend = LlamaBackend::init().map_err(|e| format!("Backend init failed: {}", e))?;
-        
         let model = LlamaModel::load_from_file(&backend, model_path, &Default::default())
             .map_err(|e| format!("Model load failed: {}", e))?;
-        
         let mut sys = System::new_all();
         sys.refresh_all();
         let available_ram_gb = sys.available_memory() / (1024 * 1024 * 1024);
-        
         let context_size = if available_ram_gb >= 16 { 4096 }
                            else if available_ram_gb >= 8 { 2048 }
                            else { 1024 };
-        
-        let mut ctx_params = LlamaContextParams::default();
-        ctx_params.n_ctx(Some(context_size));
-        ctx_params.n_batch(512);
-        ctx_params.n_threads(num_cpus::get() as u32);
-        
-        let context = model.new_context(&backend, ctx_params)
+
+        let ctx_params = LlamaContextParams::default();
+        let _temp_context = model.new_context(&backend, ctx_params)
             .map_err(|e| format!("Context creation failed: {}", e))?;
-        
+        drop(_temp_context);
+
         info!("LLM ready: {} (context: {})", config.name, context_size);
-        
         Ok(Self {
             backend,
             model: Arc::new(model),
-            context: Arc::new(Mutex::new(context)),
             model_config: config,
             context_size,
         })
@@ -240,8 +216,6 @@ impl LLMEngine {
 
     fn format_prompt(&self, messages: &[ChatMessage]) -> String {
         let mut prompt = String::new();
-        
-        // Llama-3 / Mistral / Phi-2 compatible format
         for msg in messages {
             match msg.role.as_str() {
                 "system" => prompt.push_str(&format!("<|system|>\n{}\n", msg.content)),
@@ -257,76 +231,59 @@ impl LLMEngine {
     pub async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, Box<dyn Error + Send + Sync>> {
         let start_time = Instant::now();
         let prompt = self.format_prompt(&request.messages);
-        
         info!("Processing completion request ({} tokens max)", request.max_tokens);
-        
-        let mut ctx = self.context.lock().await;
-        
-        // Tokenize prompt
+
+        let ctx_params = LlamaContextParams::default();
+        let mut ctx = self.model.new_context(&self.backend, ctx_params)
+            .map_err(|e| format!("Context creation failed: {}", e))?;
+
         let prompt_tokens = self.model.str_to_token(&prompt, AddBos::Always)
             .map_err(|e| format!("Tokenization failed: {}", e))?;
-        
         let prompt_token_count = prompt_tokens.len() as u32;
         info!("Prompt tokens: {}", prompt_token_count);
-        
-        // Create batch
+
         let mut batch = LlamaBatch::new(self.context_size as usize, 1);
-        
-        // Add prompt tokens to batch
         for (i, token) in prompt_tokens.iter().enumerate() {
             let is_last = i == prompt_tokens.len() - 1;
             batch.add(*token, i as i32, &[0], is_last)
                 .map_err(|e| format!("Batch add failed: {}", e))?;
         }
-        
-        // Decode prompt
+
         ctx.decode(&mut batch).map_err(|e| format!("Decode failed: {}", e))?;
-        
-        // Generate completion
+
         let mut generated_tokens = Vec::new();
         let mut n_cur = prompt_tokens.len();
-        let n_len = request.max_tokens as usize;
-        
-        while n_cur <= n_len {
-            // Sample next token
+        let n_len = (prompt_token_count + request.max_tokens) as usize;
+
+        while n_cur < n_len {
             let candidates = ctx.candidates_ith(batch.n_tokens() - 1);
-            
             let mut candidates_p = LlamaTokenDataArray::from_iter(candidates, false);
-            
-            // Apply temperature
-            candidates_p.sample_top_p(&mut ctx, request.top_p, 1);
-            candidates_p.sample_temp(&mut ctx, request.temperature);
-            let new_token_id = candidates_p.sample_token(&mut ctx);
-            
-            // Check for EOS
+
+            let new_token_id = candidates_p.sample_token_greedy();
+
             if self.model.is_eog_token(new_token_id) {
                 break;
             }
-            
+
             generated_tokens.push(new_token_id);
-            
-            // Prepare next batch
             batch.clear();
             batch.add(new_token_id, n_cur as i32, &[0], true)
                 .map_err(|e| format!("Batch add failed: {}", e))?;
-            
+
             n_cur += 1;
-            
-            // Decode
             ctx.decode(&mut batch).map_err(|e| format!("Decode failed: {}", e))?;
         }
-        
-        // Convert tokens to string
-        let generated_text = self.model.tokens_to_str(&generated_tokens)
+
+        let generated_text = self.model.tokens_to_str(&generated_tokens, Special::Tokenize)
             .map_err(|e| format!("Token conversion failed: {}", e))?
             .trim()
             .to_string();
-        
+
         let completion_tokens = generated_tokens.len() as u32;
         let total_tokens = prompt_token_count + completion_tokens;
-        
+
         info!("Generated {} tokens in {:?}", completion_tokens, start_time.elapsed());
-        
+
         Ok(CompletionResponse {
             id: format!("chatcmpl-{}", uuid::Uuid::new_v4()),
             object: "chat.completion".to_string(),

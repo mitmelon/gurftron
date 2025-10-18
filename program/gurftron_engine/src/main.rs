@@ -23,6 +23,13 @@ use futures_util::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::Path;
 
+mod llm_engine;
+use llm_engine::{LLMEngine, CompletionRequest, CompletionResponse, ChatMessage, ModelConfig};
+use once_cell::sync::OnceCell;
+use tokio::sync::RwLock;
+
+static LLM_ENGINE: OnceCell<Arc<RwLock<Option<LLMEngine>>>> = OnceCell::new();
+
 // === CUSTOM ERROR TYPE ===
 #[derive(Debug)]
 pub enum GurftronError {
@@ -58,9 +65,14 @@ struct NativeMessage {
     action: String,
     path: Option<String>,
     scan_id: Option<String>,
+    messages: Option<Vec<ChatMessage>>,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+    stream: Option<bool>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Default)]
 struct NativeResponse {
     result: String,
     details: String,
@@ -70,6 +82,20 @@ struct NativeResponse {
     file_id: Option<String>,
     scan_id: Option<String>,
     scan_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    object: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    created: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    choices: Option<Vec<serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    usage: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model_info: Option<ModelConfig>,
 }
 
 const HOST_NAME: &str = "com.gurftron.server";
@@ -180,6 +206,7 @@ impl ScanDatabase {
                 file_id: file_hash,
                 scan_id: Some(scan_id.to_string()),
                 scan_status: Some(status),
+                ..Default::default()
             })
         });
 
@@ -209,6 +236,7 @@ impl ScanDatabase {
                 file_id: Some(file_hash.to_string()),
                 scan_id: scan_id.or_else(|| Some(uuid::Uuid::new_v4().to_string())),
                 scan_status: Some("completed".to_string()),
+                ..Default::default()
             })
         });
 
@@ -316,6 +344,7 @@ fn scan_with_clamd(file_path: &str) -> Result<NativeResponse, Box<dyn std::error
         file_id: None,
         scan_id: None,
         scan_status: None,
+        ..Default::default()
     })
 }
 
@@ -502,6 +531,7 @@ async fn handle_native_message(
                             file_id: None,
                             scan_id: None,
                             scan_status: None,
+                            ..Default::default()
                         };
                     }
                 };
@@ -524,6 +554,7 @@ async fn handle_native_message(
                         file_id: None,
                         scan_id: None,
                         scan_status: None,
+                        ..Default::default()
                     };
                 }
 
@@ -541,6 +572,7 @@ async fn handle_native_message(
                     file_id: Some(file_hash),
                     scan_id: Some(scan_id),
                     scan_status: Some("pending".to_string()),
+                    ..Default::default()
                 }
             } else {
                 NativeResponse {
@@ -551,6 +583,7 @@ async fn handle_native_message(
                     file_id: None,
                     scan_id: None,
                     scan_status: None,
+                    ..Default::default()
                 }
             }
         },
@@ -566,6 +599,7 @@ async fn handle_native_message(
                         file_id: None,
                         scan_id: Some(scan_id),
                         scan_status: None,
+                        ..Default::default()
                     },
                     Err(e) => NativeResponse {
                         result: "error".to_string(),
@@ -575,6 +609,7 @@ async fn handle_native_message(
                         file_id: None,
                         scan_id: Some(scan_id),
                         scan_status: None,
+                        ..Default::default()
                     },
                 }
             } else {
@@ -586,6 +621,7 @@ async fn handle_native_message(
                     file_id: None,
                     scan_id: None,
                     scan_status: None,
+                    ..Default::default()
                 }
             }
         },
@@ -600,6 +636,7 @@ async fn handle_native_message(
                         file_id: Some(hash),
                         scan_id: None,
                         scan_status: None,
+                        ..Default::default()
                     },
                     Err(error) => NativeResponse {
                         result: "error".to_string(),
@@ -609,6 +646,7 @@ async fn handle_native_message(
                         file_id: None,
                         scan_id: None,
                         scan_status: None,
+                        ..Default::default()
                     },
                 }
             } else {
@@ -620,6 +658,7 @@ async fn handle_native_message(
                     file_id: None,
                     scan_id: None,
                     scan_status: None,
+                    ..Default::default()
                 }
             }
         },
@@ -631,6 +670,109 @@ async fn handle_native_message(
             file_id: None,
             scan_id: None,
             scan_status: None,
+            ..Default::default()
+        },
+        "chat_completion" => {
+            if let Some(messages) = message.messages {
+                let request = CompletionRequest {
+                    messages,
+                    max_tokens: message.max_tokens.unwrap_or(512),
+                    temperature: message.temperature.unwrap_or(0.7),
+                    top_p: message.top_p.unwrap_or(0.9),
+                    stream: message.stream.unwrap_or(false),
+                };
+                
+                match process_completion(request).await {
+                    Ok(response) => {
+                        let choices_json: Vec<serde_json::Value> = response.choices.iter()
+                            .map(|c| serde_json::json!({
+                                "index": c.index,
+                                "message": {"role": c.message.role, "content": c.message.content},
+                                "finish_reason": c.finish_reason
+                            }))
+                            .collect();
+                        
+                        let usage_json = serde_json::json!({
+                            "prompt_tokens": response.usage.prompt_tokens,
+                            "completion_tokens": response.usage.completion_tokens,
+                            "total_tokens": response.usage.total_tokens
+                        });
+                        
+                        NativeResponse {
+                            result: "success".to_string(),
+                            details: "Completion generated".to_string(),
+                            threat_level: None, confidence: None, file_id: None,
+                            scan_id: None, scan_status: None,
+                            id: Some(response.id),
+                            object: Some(response.object),
+                            created: Some(response.created),
+                            model: Some(response.model),
+                            choices: Some(choices_json),
+                            usage: Some(usage_json),
+                            model_info: None,
+                            ..Default::default()
+                        }
+                    }
+                    Err(e) => NativeResponse {
+                        result: "error".to_string(),
+                        details: format!("LLM error: {}", e),
+                        threat_level: None, confidence: None, file_id: None,
+                        scan_id: None, scan_status: None,
+                        id: None, object: None, created: None, model: None,
+                        choices: None, usage: None, model_info: None,
+                        ..Default::default()
+                    }
+                }
+            } else {
+                NativeResponse {
+                    result: "error".to_string(),
+                    details: "Missing messages field".to_string(),
+                    threat_level: None, confidence: None, file_id: None,
+                    scan_id: None, scan_status: None,
+                    id: None, object: None, created: None, model: None,
+                    choices: None, usage: None, model_info: None,
+                    ..Default::default()
+                }
+            }
+        },
+
+        "model_info" => {
+            if let Some(state) = LLM_ENGINE.get() {
+                let engine_guard = state.read().await;
+                if let Some(engine) = engine_guard.as_ref() {
+                    let info = engine.get_model_info();
+                    NativeResponse {
+                        result: "success".to_string(),
+                        details: format!("Model: {}", info.name),
+                        threat_level: None, confidence: None, file_id: None,
+                        scan_id: None, scan_status: None,
+                        id: None, object: Some("model".to_string()),
+                        created: None, model: Some(info.name.clone()),
+                        choices: None, usage: None, model_info: Some(info),
+                        ..Default::default()
+                    }
+                } else {
+                    NativeResponse {
+                        result: "error".to_string(),
+                        details: "LLM not initialized".to_string(),
+                        threat_level: None, confidence: None, file_id: None,
+                        scan_id: None, scan_status: None,
+                        id: None, object: None, created: None, model: None,
+                        choices: None, usage: None, model_info: None,
+                        ..Default::default()
+                    }
+                }
+            } else {
+                NativeResponse {
+                    result: "error".to_string(),
+                    details: "LLM state not available".to_string(),
+                    threat_level: None, confidence: None, file_id: None,
+                    scan_id: None, scan_status: None,
+                    id: None, object: None, created: None, model: None,
+                    choices: None, usage: None, model_info: None,
+                    ..Default::default()
+                }
+            }
         },
         _ => NativeResponse {
             result: "error".to_string(),
@@ -640,6 +782,7 @@ async fn handle_native_message(
             file_id: None,
             scan_id: None,
             scan_status: None,
+            ..Default::default()
         },
     }
 }
@@ -921,6 +1064,28 @@ async fn install_linux() -> Result<(), Box<dyn std::error::Error + Send + Sync>>
     }
 }
 
+async fn initialize_llm() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    info!("🤖 Initializing LLM...");
+    let model_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| std::env::temp_dir())
+        .join("gurftron_models");
+    
+    let engine = LLMEngine::new(&model_dir).await?;
+    let model_info = engine.get_model_info();
+    info!("✅ LLM ready: {}", model_info.name);
+    
+    let llm_state = LLM_ENGINE.get_or_init(|| Arc::new(RwLock::new(None)));
+    *llm_state.write().await = Some(engine);
+    Ok(())
+}
+
+async fn process_completion(request: CompletionRequest) -> Result<CompletionResponse, Box<dyn std::error::Error + Send + Sync>> {
+    let llm_state = LLM_ENGINE.get().ok_or("LLM not initialized")?;
+    let engine_guard = llm_state.read().await;
+    let engine = engine_guard.as_ref().ok_or("LLM not available")?;
+    engine.complete(request).await
+}
+
 // === MAIN APPLICATION ===
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -947,6 +1112,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     register_native_messaging().await?;
     start_daemons().await?;
+
+    if let Err(e) = initialize_llm().await {
+        warn!("LLM initialization failed (chat will be disabled): {}", e);
+    }
 
     info!("🔌 Native messaging handler ready");
     info!("💾 Async scanning with database tracking enabled");
