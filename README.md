@@ -340,6 +340,8 @@ cargo build --release
 3. Updates virus definitions
 4. Registers native messaging with your browsers
 5. Creates SQLite database for scan caching
+6. Install llm model that fits your device
+7. Exposes the completion endpoints for extension access
 
 **Verify Installation:**
 ```bash
@@ -348,7 +350,7 @@ echo '{"action":"ping"}' | ./target/release/gurftron_engine
 # Should return: {"result":"success",...}
 ```
 
-The engine now runs automatically when the extension needs to scan files.
+The engine now runs automatically when the extension needs to scan files and access local llm
 
 ---
 
@@ -732,6 +734,7 @@ We welcome contributions! Here's how:
 - **ClamAV not starting**: Manually install ClamAV for your OS
 - **Native messaging error**: Re-run the engine to re-register
 - **Port 3310 busy**: Another ClamAV instance is running, restart it
+- **Rust program not compiling**: Make sure you have [`https://cmake.org/download/`](CMAKE) and [`https://github.com/llvm/llvm-project/releases`](LLVM) Installed on your computer.
 - See [`program/guftron_engine/README.md`](program/guftron_engine/README.md) for detailed troubleshooting
 
 ### Smart Contract Issues
