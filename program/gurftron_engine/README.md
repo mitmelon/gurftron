@@ -1,3 +1,164 @@
+# Gurftron Engine — Native Antivirus & Local LLM
+
+Gurftron Engine is a compact, high-performance native host written in Rust that provides:
+
+- Fast ClamAV-based file scanning (async)
+- A native messaging bridge for browser extensions (Chrome/Brave/Edge/Firefox)
+- Optional local LLM support (llama.cpp via the `llama_cpp_2` bindings) used for threat reasoning and natural-language summaries
+
+---
+
+## Quick highlights
+
+- Native messaging actions supported (JSON over length-prefixed stdin/stdout):
+  - `scan` — start an asynchronous file scan. payload: `{ "action": "scan", "path": "C:\\path\\to\\file" }` → returns `{ scan_id, file_id }`
+  - `check_scan` — query scan result. payload: `{ "action": "check_scan", "scan_id": "..." }`
+  - `get_file_hash` — compute SHA-256 of a local file. payload: `{ "action": "get_file_hash", "path": "..." }`
+  - `ping` — health check. payload: `{ "action": "ping" }`
+  - `chat_completion` — run the local LLM completion. payload: `{ "action":"chat_completion", "messages": [{"role":"user","content":"..."}], "max_tokens":512 }`
+  - `model_info` — returns current model metadata if LLM initialized.
+
+- Scan results are persisted in a local SQLite DB (scan history and caching by file hash).
+- The engine communicates with ClamAV over TCP (default port 3310) using the INSTREAM protocol.
+
+---
+
+## Requirements (important)
+
+1. Rust toolchain (rustc + cargo) — install via https://rustup.rs/
+2. Native toolchain required for the LLM/backends:
+   - CMake — used to build native C/C++ dependencies (e.g. llama.cpp bindings). Download: https://cmake.org/download/
+   - LLVM / Clang — required by some crates and native backends (ensure clang is on PATH). Download: https://github.com/llvm/llvm-project/releases
+
+If `cargo build` fails with missing C symbols, linker errors, or failures while compiling native bindings, install CMake and LLVM and ensure they are available on your PATH before building.
+
+Optional runtime tools:
+- ClamAV (`clamd` + `freshclam`) for scanning (engine will attempt to auto-install on Windows when run).
+
+---
+
+## Build & Run
+
+Development build:
+
+```powershell
+cd program\gurftron_engine
+cargo build
+```
+
+Release build:
+
+```powershell
+cargo build --release
+```
+
+Run (first-run will attempt ClamAV setup and register native messaging manifests):
+
+```powershell
+# development
+cargo run
+
+# release
+cargo run --release
+```
+
+Executable paths:
+- debug: `target/debug/gurftron_engine` (Windows: `gurftron_engine.exe`)
+- release: `target/release/gurftron_engine`
+
+---
+
+## Local LLM (optional)
+
+The engine embeds an optional local LLM layer using the `llama_cpp_2` bindings. The LLM is initialized on demand and used only for `chat_completion` and `model_info` actions.
+
+Behavior details:
+- On initialization the engine will download a GGUF model into a local cache directory (default: platform data dir + `gurftron_models`). Model downloads can be large.
+- The engine auto-selects a model based on available RAM. Models included in code: TinyLlama-1.1B, Phi-2-2.7B, Mistral-7B-Instruct, Llama-3-8B-Instruct.
+- The LLM backend requires native build tooling (CMake + LLVM) because it links native C/C++ libraries.
+
+Chat completion request example:
+
+```json
+{
+  "action": "chat_completion",
+  "messages": [
+    {"role": "system", "content": "You are a security assistant."},
+    {"role": "user",   "content": "Summarize this evidence and produce a concise threat summary."}
+  ],
+  "max_tokens": 256
+}
+```
+
+Response: structured completion with `id`, `model`, `choices` and `usage` fields.
+
+If LLM initialization fails, the engine logs a warning and continues to accept non-LLM actions.
+
+---
+
+## Native messaging protocol (details)
+
+Communication uses a 4-byte little-endian length prefix followed by UTF-8 JSON payloads on stdin/stdout.
+
+Examples of payload shapes and expected responses are implemented in `src/main.rs` (see `handle_native_message`). All responses include at least `result` and `details` fields.
+
+Scan request example:
+
+```json
+{ "action": "scan", "path": "C:\\path\\to\\file.exe" }
+```
+
+LLM completion example:
+
+```json
+{ "action": "chat_completion", "messages": [{"role":"user","content":"Explain X"}], "max_tokens": 512 }
+```
+
+---
+
+## Troubleshooting
+
+- `cargo build` errors that mention `clang`, `cc`, or missing libraries usually mean CMake/LLVM are missing — install them and retry.
+- If `clamd` can't be reached on port 3310, ensure `clamd` is running and configured to listen on TCP 127.0.0.1:3310.
+- Model download failures: check network, disk space, and permissions for the model cache dir.
+
+Quick checks (PowerShell):
+
+```powershell
+# clamd
+where clamd
+
+# cmake
+where cmake
+
+# clang
+where clang
+```
+
+---
+
+## Testing
+
+Ping test:
+
+```powershell
+echo '{"action":"ping"}' | .\target\release\gurftron_engine.exe
+```
+
+Manual LLM test (requires model): call `chat_completion` with a properly length-prefixed message (helper script recommended).
+
+If you'd like, I can add a tiny helper script to wrap JSON messages with the 4-byte length prefix to make manual testing from PowerShell or bash easy.
+
+---
+
+## Developer notes
+
+- Scan records and caching live in SQLite (user local app data dir).
+- LLM completions are exposed via structured responses (`choices`, `usage`).
+
+---
+
+License: see repository root.
 # Gurftron Security Engine
 
 A high-performance antivirus scanning engine written in Rust that bridges browser extensions with ClamAV for real-time file scanning. The engine provides native messaging capabilities, async scanning with progress tracking, and intelligent caching through SQLite.
