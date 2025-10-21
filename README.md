@@ -20,20 +20,6 @@
   **🌐 [Visit Our Website](https://gurftron.work.gd)** | **📖 [Documentation](#-getting-started)** | **💬 [Report Issues](https://github.com/mitmelon/gurftron/issues)**
   
 </div>
- 
----
-
-## 🎥 Demo Video
-
-* Watch Gurftron in action: AI-powered phishing detection, community voting, and blockchain rewards*
-
-<div align="center">
-  <video src="https://github.com/user-attachments/assets/c612e121-29e2-4113-bad7-91511e7bee4b" width="100%" controls>
-    Your browser does not support the video tag.
-  </video>
-</div>
-
----
 
 > ### ⚠️ Work in Progress — Unstable
 >
@@ -48,6 +34,14 @@
 ## 🌟 About
 
 Gurftron is a next-generation browser security extension that combines artificial intelligence, community-driven threat detection, and blockchain-based incentives to protect users from phishing attacks, malware, and malicious websites. Built on Starknet, Gurftron rewards users with STRK tokens for identifying and voting on threats, creating a decentralized security ecosystem.
+
+* Watch Gurftron in action: AI-powered phishing detection, community voting, and blockchain rewards*
+
+<div align="center">
+  <video src="https://github.com/user-attachments/assets/c612e121-29e2-4113-bad7-91511e7bee4b" width="100%" controls>
+    Your browser does not support the video tag.
+  </video>
+</div>
 
 ---
 
