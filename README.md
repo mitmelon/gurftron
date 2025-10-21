@@ -7,6 +7,11 @@
   
   ### **AI-Powered Phishing Protection with Gamified Rewards on Starknet** 🚀
   
+  <audio controls>
+    <source src="src/images/song.mp3" type="audio/mpeg">
+    Your browser does not support the audio element.
+  </audio>
+  
   [![Made with Rust](https://img.shields.io/badge/Made%20with-Rust-orange?style=flat-square&logo=rust)](https://www.rust-lang.org/)
   [![Cairo](https://img.shields.io/badge/Cairo-2.8.0-blue?style=flat-square)](https://www.cairo-lang.org/)
   [![Starknet](https://img.shields.io/badge/Starknet-Sepolia-purple?style=flat-square)](https://www.starknet.io/)
