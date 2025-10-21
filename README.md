@@ -6,8 +6,6 @@
   # 🛡️ Gurftron
   
   ### **AI-Powered Phishing Protection with Gamified Rewards on Starknet** 🚀
-
-  [![🎵 Play Theme Song](https://img.shields.io/badge/🎵_Play_Theme_Song-Click_Here-blue?style=for-the-badge)](https://github.com/user-attachments/files/23019644/gurftron-song.mp3)
   
   [![Made with Rust](https://img.shields.io/badge/Made%20with-Rust-orange?style=flat-square&logo=rust)](https://www.rust-lang.org/)
   [![Cairo](https://img.shields.io/badge/Cairo-2.8.0-blue?style=flat-square)](https://www.cairo-lang.org/)
@@ -23,6 +21,18 @@
   
 </div>
  
+---
+
+## 🎥 Demo Video
+
+* Watch Gurftron in action: AI-powered phishing detection, community voting, and blockchain rewards*
+
+<div align="center">
+  <video src="https://github.com/user-attachments/assets/c612e121-29e2-4113-bad7-91511e7bee4b" width="100%" controls>
+    Your browser does not support the video tag.
+  </video>
+</div>
+
 ---
 
 > ### ⚠️ Work in Progress — Unstable
