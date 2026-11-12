@@ -1,0 +1,13 @@
+[server]
+host = "127.0.0.1"          # localhost only. v0.1 has no authentication.
+port = 3000
+max_concurrent_gguf = 1     # generations are queued, never run in parallel
+request_timeout_secs = 60
+log_level = "info"
+gguf_idle_unload_secs = 300 # free the GGUF model after 5 idle minutes (0 = never)
+max_onnx_memory_mb = 800    # evict least recently used ONNX models past this
+
+[limits]
+max_prompt_chars = 20000
+max_output_tokens = 1024
+max_batch_size = 8

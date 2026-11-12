@@ -1,0 +1,43 @@
+# One block per model. Add a file, add a block, restart. No code change.
+# Paths are relative to this file. `name` is the id used in API calls (lowercase kebab-case).
+# kind: "gguf" (generation) | "embedding" | "classifier"
+
+[[model]]
+name = "qwen3-0-6b"
+path = "models/Qwen3-0.6B-Q4_K_M.gguf"
+kind = "gguf"
+n_ctx = 4096
+n_threads = 4
+temperature_default = 0.2
+chat_template = "qwen3"     # chatml | qwen3 | gemma | llama3 | mistral | plain
+description = "Tiny writer for episodic memory"
+
+[[model]]
+name = "bge-small"
+path = "models/bge-small-en-v1.5/model.onnx"
+tokenizer = "models/bge-small-en-v1.5/tokenizer.json"
+kind = "embedding"
+dim = 384
+normalize = true
+pooling = "mean"            # mean | cls
+description = "Sentence embeddings, 384 dimensions"
+
+[[model]]
+name = "guard"
+path = "models/protectai-guard/model.onnx"
+tokenizer = "models/protectai-guard/tokenizer.json"
+kind = "classifier"
+labels = ["SAFE", "INJECTION"]
+threshold = 0.75
+safe_labels = ["SAFE"]      # anything else counts as a threat when used at /v1/guard
+block_on_uncertain = true   # below the threshold, block (fail safe)
+description = "Prompt injection guard"
+
+[[model]]
+name = "memory-classifier"
+path = "models/memory-classifier/model.onnx"
+tokenizer = "models/memory-classifier/tokenizer.json"
+kind = "classifier"
+labels = ["EPISODIC", "SEMANTIC", "PROCEDURAL", "IGNORE"]
+threshold = 0.5
+description = "Memory type classifier"
