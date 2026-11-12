@@ -26,7 +26,7 @@ use crate::{
     metrics::{Metrics, ModelMetrics},
 };
 
-pub type Shared<T: ?Sized> = Arc<Mutex<Box<T>>>;
+pub type Shared<T> = Arc<Mutex<Box<T>>>;
 
 #[derive(Clone)]
 enum Handle {

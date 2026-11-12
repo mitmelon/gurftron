@@ -435,6 +435,7 @@ impl GenerativeEngine for GgufEngine {
         let mut utf8 = Vec::new();
         let mut n_cur = prompt.len() as i32;
         let mut completion_tokens = 0usize;
+        #[allow(unused_assignments)]
         let mut finish = FinishReason::Length;
 
         loop {

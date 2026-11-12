@@ -20,7 +20,8 @@ Rust (axum, tokio, llama-cpp-2, ort, tokenizers) and Node.js 20+ (Fastify 5).
 ### Prerequisites
 
 - Rust stable and `cargo`
-- Linux: `build-essential`, `cmake`, `libclang-dev`. Windows: Visual Studio Build Tools and CMake.
+- Linux: `build-essential`, `cmake`, `libclang-dev`, `pkg-config`, `libssl-dev` (Debian/Ubuntu: `sudo apt install build-essential cmake libclang-dev pkg-config libssl-dev`). The OpenSSL headers are needed only to download ONNX Runtime at build time.
+- Windows: Visual Studio Build Tools and CMake.
 - Node.js 20 or newer
 
 ### Run the loader
